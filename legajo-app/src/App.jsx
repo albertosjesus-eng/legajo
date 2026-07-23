@@ -352,27 +352,12 @@ function AskClaudePanel({ projectId, color }) {
     setLoading(true);
     setError("");
     try {
-      const { data, error: fnError } = await supabase.functions.invoke("ask-claude", {
-        body: { project_id: projectId, question: q },
-      });
-
-      if (fnError) {
-        // supabase-js oculta el cuerpo real de la respuesta de error dentro de
-        // fnError.context (un Response sin leer). Lo intentamos leer nosotros.
-        let detail = fnError.message || "error desconocido";
-        try {
-          if (fnError.context && typeof fnError.context.json === "function") {
-            const body = await fnError.context.json();
-            if (body?.error) {
-              detail = body.error + (body.detail ? ": " + (typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail)) : "");
-            }
-          }
-        } catch (parseErr) {
-          // si no se puede leer, nos quedamos con el mensaje genérico
-        }
+      const { ok, status, data } = await callEdgeFunction("ask-claude", { project_id: projectId, question: q });
+      if (!ok || data?.error) {
+        const detail = data?.error
+          ? data.error + (data.detail ? ": " + (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : "")
+          : `HTTP ${status}`;
         setError("No se pudo obtener respuesta (" + detail + ").");
-      } else if (data?.error) {
-        setError("No se pudo obtener respuesta (" + data.error + (data.detail ? ": " + JSON.stringify(data.detail) : "") + ").");
       } else {
         setHistory((h) => [...h, { question: q, answer: data.answer }]);
       }
@@ -431,6 +416,27 @@ function AskClaudePanel({ projectId, color }) {
   );
 }
 
+// Llama a una Edge Function directamente por HTTP (en vez de supabase.functions.invoke,
+// que en ciertas versiones de supabase-js oculta el cuerpo real de las respuestas de
+// error). Así siempre podemos ver el motivo exacto de un fallo.
+async function callEdgeFunction(name, body) {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData?.session?.access_token;
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const res = await fetch(`${supabaseUrl}/functions/v1/${name}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token || anonKey}`,
+      apikey: anonKey,
+    },
+    body: JSON.stringify(body || {}),
+  });
+  const data = await res.json().catch(() => null);
+  return { ok: res.ok, status: res.status, data };
+}
+
 function LegajoApp({ userId, userEmail, onLogout }) {
   const [projects, setProjects] = useState([]);
   const [activeId, setActiveId] = useState(null);
@@ -474,7 +480,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     const token = sessionData?.session?.access_token;
     if (!token) return;
     try {
-      const { data } = await supabase.functions.invoke("calendar-status");
+      const { data } = await callEdgeFunction("calendar-status");
       if (data?.connections?.includes("google")) setGoogleConnected(true);
     } catch (e) {
       // silencioso: si falla, simplemente se mostrará el botón de conectar
@@ -641,8 +647,9 @@ function LegajoApp({ userId, userEmail, onLogout }) {
 
     if (googleConnected) {
       try {
-        const { data } = await supabase.functions.invoke("sync-calendar-event", {
-          body: { action: "create", event: { title: ev.title, date: ev.date, time: ev.time } },
+        const { data } = await callEdgeFunction("sync-calendar-event", {
+          action: "create",
+          event: { title: ev.title, date: ev.date, time: ev.time },
         });
         if (data?.google_event_id) {
           await supabase.from("events").update({ google_event_id: data.google_event_id }).eq("id", ev.id);
@@ -669,8 +676,9 @@ function LegajoApp({ userId, userEmail, onLogout }) {
 
     if (googleConnected && ev?.google_event_id) {
       try {
-        await supabase.functions.invoke("sync-calendar-event", {
-          body: { action: "delete", event: { google_event_id: ev.google_event_id } },
+        await callEdgeFunction("sync-calendar-event", {
+          action: "delete",
+          event: { google_event_id: ev.google_event_id },
         });
       } catch (e) {
         // si falla, el evento ya se ha borrado en Legajo; quedará huérfano en Google
