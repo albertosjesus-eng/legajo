@@ -8,6 +8,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID")!;
 const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 function json(body: unknown, status = 200) {
@@ -38,12 +39,15 @@ function buildGoogleEventBody(event: { title: string; date: string; time?: strin
 
 Deno.serve(async (req) => {
   try {
-    const jwt = (req.headers.get("Authorization") || "").replace("Bearer ", "");
-    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-
-    const { data: userData, error: userError } = await supabase.auth.getUser(jwt);
-    if (userError || !userData?.user) return json({ error: "unauthorized" }, 401);
+    const authHeader = req.headers.get("Authorization") || "";
+    const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: userData, error: userError } = await authClient.auth.getUser();
+    if (userError || !userData?.user) return json({ error: "unauthorized", detail: userError?.message }, 401);
     const userId = userData.user.id;
+
+    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
     const { action, event } = await req.json();
 

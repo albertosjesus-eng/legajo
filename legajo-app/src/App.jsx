@@ -356,7 +356,9 @@ function AskClaudePanel({ projectId, color }) {
         body: { project_id: projectId, question: q },
       });
       if (fnError || data?.error) {
-        setError("No se pudo obtener respuesta. Comprueba que la función 'ask-claude' esté desplegada e inténtalo de nuevo.");
+        setError(
+          "No se pudo obtener respuesta (" + (data?.error || fnError?.message || "error desconocido") + ")."
+        );
       } else {
         setHistory((h) => [...h, { question: q, answer: data.answer }]);
       }
@@ -369,11 +371,6 @@ function AskClaudePanel({ projectId, color }) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto flex flex-col gap-3 pr-1 mb-3">
-        {history.length === 0 && (
-          <p className="text-sm" style={{ color: TEXT_MUTED }}>
-            Pregunta cosas como "¿qué me estoy dejando?" o "¿hay algo sin seguimiento?".
-          </p>
-        )}
         {history.map((h, i) => (
           <div key={i} className="flex flex-col gap-1.5">
             <div

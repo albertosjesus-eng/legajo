@@ -8,6 +8,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID")!;
 const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const APP_URL = Deno.env.get("APP_URL")!; // p.ej. https://legajo.vercel.app
 
@@ -27,11 +28,14 @@ Deno.serve(async (req) => {
   if (oauthError) return redirectWithParam(`calendar_error=${encodeURIComponent(oauthError)}`);
   if (!code || !state) return redirectWithParam("calendar_error=missing_params");
 
-  const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-
-  const { data: userData, error: userError } = await supabase.auth.getUser(state);
+  const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: `Bearer ${state}` } },
+  });
+  const { data: userData, error: userError } = await authClient.auth.getUser();
   if (userError || !userData?.user) return redirectWithParam("calendar_error=invalid_session");
   const userId = userData.user.id;
+
+  const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
   const redirectUri = `${SUPABASE_URL}/functions/v1/google-oauth-callback`;
 

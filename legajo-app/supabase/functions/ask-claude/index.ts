@@ -7,6 +7,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 
@@ -23,12 +24,21 @@ type EventRow = { title: string; date: string; time: string | null };
 
 Deno.serve(async (req) => {
   try {
-    const jwt = (req.headers.get("Authorization") || "").replace("Bearer ", "");
-    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-
-    const { data: userData, error: userError } = await supabase.auth.getUser(jwt);
-    if (userError || !userData?.user) return json({ error: "unauthorized" }, 401);
+    const authHeader = req.headers.get("Authorization") || "";
+    // Cliente "de identidad": usa la clave anon + el token del usuario para
+    // averiguar quién es, exactamente igual que lo haría el propio navegador.
+    const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: userData, error: userError } = await authClient.auth.getUser();
+    if (userError || !userData?.user) {
+      return json({ error: "unauthorized", detail: userError?.message || "sin usuario" }, 401);
+    }
     const userId = userData.user.id;
+
+    // Cliente "de servicio": para leer/escribir en la base de datos sin las
+    // restricciones de RLS, una vez ya sabemos con certeza quién es el usuario.
+    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
     const { project_id, question } = await req.json();
     if (!project_id || !question) return json({ error: "missing_params" }, 400);
