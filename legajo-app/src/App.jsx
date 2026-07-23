@@ -68,7 +68,7 @@ function ProjectCard({ project, onOpen }) {
   );
 }
 
-function NotesPanel({ notes, onAdd, onUpdate, onDelete, color }) {
+function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, color }) {
   const [openId, setOpenId] = useState(null);
   const openNote = notes.find((n) => n.id === openId);
 
@@ -76,7 +76,10 @@ function NotesPanel({ notes, onAdd, onUpdate, onDelete, color }) {
     return (
       <div className="flex flex-col h-full">
         <button
-          onClick={() => setOpenId(null)}
+          onClick={() => {
+            onFlush(openId);
+            setOpenId(null);
+          }}
           className="flex items-center gap-1 text-xs mb-3 self-start"
           style={{ color: TEXT_MUTED }}
         >
@@ -160,30 +163,57 @@ function NotesPanel({ notes, onAdd, onUpdate, onDelete, color }) {
 
 function TasksPanel({ tasks, onAdd, onToggle, onDelete, color }) {
   const [text, setText] = useState("");
+  const [dueDate, setDueDate] = useState("");
+  const [showDate, setShowDate] = useState(false);
   const submit = () => {
     if (!text.trim()) return;
-    onAdd(text.trim());
+    onAdd(text.trim(), dueDate || null);
     setText("");
+    setDueDate("");
+    setShowDate(false);
   };
-  const pending = tasks.filter((t) => !t.done);
+  const today = todayISO();
+  const pending = tasks
+    .filter((t) => !t.done)
+    .slice()
+    .sort((a, b) => (a.due_date || "9999-99-99").localeCompare(b.due_date || "9999-99-99"));
   const done = tasks.filter((t) => t.done);
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex gap-2 mb-3">
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submit();
-          }}
-          placeholder="Añadir tarea..."
-          className="flex-1 px-3 py-2 rounded-md text-sm outline-none"
-          style={{ background: PAPER, color: INK_ON_PAPER }}
-        />
-        <button onClick={submit} className="px-3 rounded-md" style={{ background: color, color: "#fff" }}>
-          <Plus size={16} />
-        </button>
+      <div className="flex flex-col gap-1.5 mb-3">
+        <div className="flex gap-2">
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submit();
+            }}
+            placeholder="Añadir tarea..."
+            className="flex-1 px-3 py-2 rounded-md text-sm outline-none"
+            style={{ background: PAPER, color: INK_ON_PAPER }}
+          />
+          <button
+            onClick={() => setShowDate((s) => !s)}
+            title="Poner fecha límite"
+            className="px-2.5 rounded-md"
+            style={{ background: showDate || dueDate ? color : SURFACE2, color: showDate || dueDate ? "#fff" : TEXT_MUTED }}
+          >
+            <CalendarDays size={15} />
+          </button>
+          <button onClick={submit} className="px-3 rounded-md" style={{ background: color, color: "#fff" }}>
+            <Plus size={16} />
+          </button>
+        </div>
+        {showDate && (
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            className="px-2 py-1.5 rounded text-sm outline-none self-start"
+            style={{ background: PAPER, color: INK_ON_PAPER }}
+          />
+        )}
       </div>
       <div className="flex-1 overflow-y-auto flex flex-col gap-1.5 pr-1">
         {tasks.length === 0 && (
@@ -191,23 +221,38 @@ function TasksPanel({ tasks, onAdd, onToggle, onDelete, color }) {
             Sin tareas todavía.
           </p>
         )}
-        {pending.map((t) => (
-          <div key={t.id} className="flex items-start gap-2 p-2 rounded-md group" style={{ background: SURFACE2 }}>
-            <button onClick={() => onToggle(t)} className="mt-0.5 shrink-0" style={{ color }}>
-              <Square size={16} />
-            </button>
-            <span className="text-sm flex-1" style={{ color: TEXT_LIGHT }}>
-              {t.text}
-            </span>
-            <button
-              onClick={() => onDelete(t.id)}
-              className="opacity-0 group-hover:opacity-100 shrink-0"
-              style={{ color: TEXT_MUTED }}
-            >
-              <X size={14} />
-            </button>
-          </div>
-        ))}
+        {pending.map((t) => {
+          const isOverdue = t.due_date && t.due_date < today;
+          const isToday = t.due_date && t.due_date === today;
+          return (
+            <div key={t.id} className="flex items-start gap-2 p-2 rounded-md group" style={{ background: SURFACE2 }}>
+              <button onClick={() => onToggle(t)} className="mt-0.5 shrink-0" style={{ color }}>
+                <Square size={16} />
+              </button>
+              <div className="flex-1 min-w-0">
+                <span className="text-sm" style={{ color: TEXT_LIGHT }}>
+                  {t.text}
+                </span>
+                {t.due_date && (
+                  <div
+                    className="text-[11px] font-mono mt-0.5"
+                    style={{ color: isOverdue ? "#e0836f" : isToday ? color : TEXT_MUTED }}
+                  >
+                    {isOverdue ? "vencida · " : ""}
+                    {t.due_date.slice(5).replace("-", "/")}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => onDelete(t.id)}
+                className="opacity-0 group-hover:opacity-100 shrink-0"
+                style={{ color: TEXT_MUTED }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          );
+        })}
         {done.length > 0 && (
           <div className="text-xs mt-2 mb-1" style={{ color: TEXT_MUTED }}>
             Hechas
@@ -460,6 +505,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   const [calendarNotice, setCalendarNotice] = useState(null);
 
   const noteTimers = useRef({});
+  const notePending = useRef({});
 
   useEffect(() => {
     loadProjects();
@@ -607,21 +653,46 @@ function LegajoApp({ userId, userEmail, onLogout }) {
       ...pd,
       [activeId]: { ...pd[activeId], notes: pd[activeId].notes.map((n) => (n.id === id ? { ...n, ...patch } : n)) },
     }));
+    // Acumulamos los cambios pendientes (título Y cuerpo) en vez de quedarnos
+    // solo con el último campo tocado, para no perder ninguno de los dos si
+    // el usuario alterna entre título y cuerpo antes de que se guarde.
+    notePending.current[id] = { ...(notePending.current[id] || {}), ...patch };
     clearTimeout(noteTimers.current[id]);
-    noteTimers.current[id] = setTimeout(() => {
-      supabase.from("notes").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id);
-    }, 500);
+    noteTimers.current[id] = setTimeout(() => flushNote(id), 500);
   }
 
+  function flushNote(id) {
+    clearTimeout(noteTimers.current[id]);
+    const pending = notePending.current[id];
+    if (!pending) return;
+    delete notePending.current[id];
+    supabase.from("notes").update({ ...pending, updated_at: new Date().toISOString() }).eq("id", id);
+  }
+
+  function flushAllNotes() {
+    Object.keys(notePending.current).forEach((id) => flushNote(id));
+  }
+
+  useEffect(() => {
+    window.addEventListener("beforeunload", flushAllNotes);
+    return () => {
+      flushAllNotes();
+      window.removeEventListener("beforeunload", flushAllNotes);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function deleteNote(id) {
+    clearTimeout(noteTimers.current[id]);
+    delete notePending.current[id];
     await supabase.from("notes").delete().eq("id", id);
     setProjectData((pd) => ({ ...pd, [activeId]: { ...pd[activeId], notes: pd[activeId].notes.filter((n) => n.id !== id) } }));
   }
 
-  async function addTask(text) {
+  async function addTask(text, dueDate) {
     const { data: task, error } = await supabase
       .from("tasks")
-      .insert({ project_id: activeId, user_id: userId, text })
+      .insert({ project_id: activeId, user_id: userId, text, due_date: dueDate || null })
       .select()
       .single();
     if (error || !task) return;
@@ -814,6 +885,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
             <div>
               <button
                 onClick={() => {
+                  flushAllNotes();
                   setView("home");
                   loadProjects();
                 }}
@@ -870,7 +942,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                       <div className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>
                         <FileText size={13} /> Notas
                       </div>
-                      <NotesPanel notes={data.notes} onAdd={addNote} onUpdate={updateNote} onDelete={deleteNote} color={active.color} />
+                      <NotesPanel notes={data.notes} onAdd={addNote} onUpdate={updateNote} onDelete={deleteNote} onFlush={flushNote} color={active.color} />
                     </div>
                     <div className="flex flex-col" style={{ minHeight: 320 }}>
                       <div className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>

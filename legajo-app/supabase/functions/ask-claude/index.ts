@@ -10,7 +10,7 @@ import { withSupabase } from "jsr:@supabase/server@^1";
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 
 type NoteRow = { title: string | null; body: string | null };
-type TaskRow = { text: string; done: boolean };
+type TaskRow = { text: string; done: boolean; due_date: string | null };
 type EventRow = { title: string; date: string; time: string | null };
 
 export default {
@@ -25,7 +25,7 @@ export default {
 
       const [notesRes, tasksRes, eventsRes] = await Promise.all([
         supabase.from("notes").select("title,body").eq("project_id", project_id),
-        supabase.from("tasks").select("text,done").eq("project_id", project_id),
+        supabase.from("tasks").select("text,done,due_date").eq("project_id", project_id),
         supabase.from("events").select("title,date,time").eq("project_id", project_id),
       ]);
 
@@ -45,7 +45,7 @@ export default {
       lines.push("");
       lines.push(`Tareas (${tasks.length}):`);
       if (tasks.length === 0) lines.push("(ninguna)");
-      tasks.forEach((t) => lines.push(`- [${t.done ? "hecha" : "pendiente"}] ${t.text}`));
+      tasks.forEach((t) => lines.push(`- [${t.done ? "hecha" : "pendiente"}]${t.due_date ? ` (vence ${t.due_date})` : ""} ${t.text}`));
       lines.push("");
       lines.push(`Agenda (${events.length}):`);
       if (events.length === 0) lines.push("(ninguna)");
