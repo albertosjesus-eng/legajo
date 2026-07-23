@@ -46,6 +46,10 @@ const tools = [
   },
 ];
 
+function isValidISODate(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
 async function runTool(
   // deno-lint-ignore no-explicit-any
   supabase: any,
@@ -55,15 +59,26 @@ async function runTool(
   input: Record<string, string>
 ) {
   if (name === "create_task") {
+    const dueDate = isValidISODate(input.due_date) ? input.due_date : null;
+    const dateWasDropped = !!input.due_date && !dueDate;
     const { data, error } = await supabase
       .from("tasks")
-      .insert({ project_id: projectId, user_id: userId, text: input.text, due_date: input.due_date || null })
+      .insert({ project_id: projectId, user_id: userId, text: input.text, due_date: dueDate })
       .select()
       .single();
     if (error) return { ok: false, error: error.message };
-    return { ok: true, created: { type: "task", ...data } };
+    return {
+      ok: true,
+      created: { type: "task", ...data },
+      note: dateWasDropped
+        ? "La fecha indicada no tenía un formato reconocible (se esperaba YYYY-MM-DD); la tarea se creó sin fecha límite."
+        : undefined,
+    };
   }
   if (name === "create_event") {
+    if (!isValidISODate(input.date)) {
+      return { ok: false, error: "La fecha de la cita no tiene un formato reconocible (se esperaba YYYY-MM-DD)." };
+    }
     const { data, error } = await supabase
       .from("events")
       .insert({ project_id: projectId, user_id: userId, title: input.title, date: input.date, time: input.time || null })
@@ -125,8 +140,14 @@ export default {
         "contradicciones entre notas y planificación) sin inventar datos que no estén en el contexto. " +
         "Si el usuario te pide EXPLÍCITAMENTE crear tareas o citas (por ejemplo 'créame tareas a partir de las notas' " +
         "o 'añade una cita para X'), usa las herramientas create_task / create_event para crearlas de verdad, " +
-        "basándote en lo que digan las notas y usando la fecha de hoy como referencia para calcular fechas relativas. " +
-        "Cuando crees algo, termina con una frase breve confirmando qué has creado. No uses las herramientas si el " +
+        "basándote en lo que digan las notas y usando la fecha de hoy como referencia para calcular fechas relativas " +
+        "en formato exacto YYYY-MM-DD (por ejemplo, si hoy es 2026-07-23 y las notas dicen 'mediados de septiembre', " +
+        "usa algo como 2026-09-15, no una frase). " +
+        "Después de cada llamada a una herramienta, comprueba el resultado: si dice ok: true, la acción se realizó de " +
+        "verdad (aunque venga con un 'note' avisando de algún detalle, como que se descartó una fecha mal formada); " +
+        "si dice ok: false, la acción NO se realizó en absoluto, aunque parte de los datos parecieran correctos. " +
+        "Nunca digas que algo se ha creado, ni siquiera parcialmente, si el resultado fue ok: false — en ese caso " +
+        "dilo con claridad como un fallo, sin inventar una historia de éxito parcial. No uses las herramientas si el " +
         "usuario no lo ha pedido explícitamente.";
 
       const messages: Array<{ role: string; content: unknown }> = [

@@ -165,12 +165,14 @@ function TasksPanel({ tasks, onAdd, onToggle, onDelete, color }) {
   const [text, setText] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [showDate, setShowDate] = useState(false);
-  const submit = () => {
+  const submit = async () => {
     if (!text.trim()) return;
-    onAdd(text.trim(), dueDate || null);
-    setText("");
-    setDueDate("");
-    setShowDate(false);
+    const ok = await onAdd(text.trim(), dueDate || null);
+    if (ok) {
+      setText("");
+      setDueDate("");
+      setShowDate(false);
+    }
   };
   const today = todayISO();
   const pending = tasks
@@ -286,12 +288,14 @@ function AgendaPanel({ events, onAdd, onDelete, color }) {
   const [time, setTime] = useState("");
   const [showForm, setShowForm] = useState(false);
 
-  const submit = () => {
+  const submit = async () => {
     if (!title.trim() || !date) return;
-    onAdd(title.trim(), date, time);
-    setTitle("");
-    setTime("");
-    setShowForm(false);
+    const ok = await onAdd(title.trim(), date, time);
+    if (ok) {
+      setTitle("");
+      setTime("");
+      setShowForm(false);
+    }
   };
 
   const sorted = events.slice().sort((a, b) => (a.date + (a.time || "00:00")).localeCompare(b.date + (b.time || "00:00")));
@@ -506,7 +510,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   const [newColor, setNewColor] = useState(PALETTE[0].hex);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [loadError, setLoadError] = useState("");
-  const [noteSaveError, setNoteSaveError] = useState("");
+  const [saveError, setSaveError] = useState("");
   const [googleConnected, setGoogleConnected] = useState(false);
   const [connectingGoogle, setConnectingGoogle] = useState(false);
   const [calendarNotice, setCalendarNotice] = useState(null);
@@ -675,7 +679,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     delete notePending.current[id];
     const { error } = await supabase.from("notes").update({ ...pending, updated_at: new Date().toISOString() }).eq("id", id);
     if (error) {
-      setNoteSaveError(error.message || "error desconocido al guardar la nota");
+      setSaveError("No se pudo guardar la nota: " + (error.message || "error desconocido"));
     }
   }
 
@@ -705,8 +709,12 @@ function LegajoApp({ userId, userEmail, onLogout }) {
       .insert({ project_id: activeId, user_id: userId, text, due_date: dueDate || null })
       .select()
       .single();
-    if (error || !task) return;
+    if (error || !task) {
+      setSaveError("No se pudo crear la tarea: " + (error?.message || "error desconocido"));
+      return false;
+    }
     setProjectData((pd) => ({ ...pd, [activeId]: { ...pd[activeId], tasks: [...pd[activeId].tasks, task] } }));
+    return true;
   }
 
   async function toggleTask(task) {
@@ -729,7 +737,10 @@ function LegajoApp({ userId, userEmail, onLogout }) {
       .insert({ project_id: activeId, user_id: userId, title, date, time: time || null })
       .select()
       .single();
-    if (error || !ev) return;
+    if (error || !ev) {
+      setSaveError("No se pudo crear la cita: " + (error?.message || "error desconocido"));
+      return false;
+    }
     setProjectData((pd) => ({ ...pd, [activeId]: { ...pd[activeId], events: [...pd[activeId].events, ev] } }));
 
     if (googleConnected) {
@@ -752,6 +763,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
         // si falla la sincronización, el evento se queda igualmente guardado en Legajo
       }
     }
+    return true;
   }
 
   async function deleteEvent(id) {
@@ -833,13 +845,13 @@ function LegajoApp({ userId, userEmail, onLogout }) {
           </div>
         )}
 
-        {noteSaveError && (
+        {saveError && (
           <div
             className="mb-4 px-3 py-2 rounded-md text-xs flex items-center justify-between"
             style={{ background: "#4a2b23", color: "#f2d9d0" }}
           >
-            <span>No se pudo guardar la nota: {noteSaveError}</span>
-            <button onClick={() => setNoteSaveError("")} style={{ color: "inherit" }}>
+            <span>{saveError}</span>
+            <button onClick={() => setSaveError("")} style={{ color: "inherit" }}>
               <X size={13} />
             </button>
           </div>
