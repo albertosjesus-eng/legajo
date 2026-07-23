@@ -342,7 +342,7 @@ function AgendaPanel({ events, onAdd, onDelete, color }) {
 function AskClaudePanel({ projectId, color }) {
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
-  const [history, setHistory] = useState([]);
+  const [lastQA, setLastQA] = useState(null);
   const [error, setError] = useState("");
 
   const ask = async () => {
@@ -351,6 +351,7 @@ function AskClaudePanel({ projectId, color }) {
     setQuestion("");
     setLoading(true);
     setError("");
+    setLastQA(null);
     try {
       const { ok, status, data } = await callEdgeFunction("ask-claude", { project_id: projectId, question: q });
       if (!ok || data?.error) {
@@ -359,7 +360,7 @@ function AskClaudePanel({ projectId, color }) {
           : `HTTP ${status}`;
         setError("No se pudo obtener respuesta (" + detail + ").");
       } else {
-        setHistory((h) => [...h, { question: q, answer: data.answer }]);
+        setLastQA({ question: q, answer: data.answer });
       }
     } catch (e) {
       setError("No se pudo obtener respuesta. Inténtalo de nuevo.");
@@ -369,20 +370,25 @@ function AskClaudePanel({ projectId, color }) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto flex flex-col gap-3 pr-1 mb-3">
-        {history.map((h, i) => (
-          <div key={i} className="flex flex-col gap-1.5">
+      <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1 mb-3">
+        {!lastQA && !loading && (
+          <p className="text-sm" style={{ color: TEXT_MUTED }}>
+            El asistente responde aquí, de forma breve, a tu última pregunta.
+          </p>
+        )}
+        {lastQA && (
+          <div className="flex flex-col gap-1.5">
             <div
               className="text-sm font-medium self-end px-3 py-1.5 rounded-md"
               style={{ background: color, color: "#fff", maxWidth: "90%" }}
             >
-              {h.question}
+              {lastQA.question}
             </div>
             <div className="text-sm px-3 py-2 rounded-md whitespace-pre-wrap" style={{ background: PAPER, color: INK_ON_PAPER }}>
-              {h.answer}
+              {lastQA.answer}
             </div>
           </div>
-        ))}
+        )}
         {loading && (
           <div className="flex items-center gap-2 text-xs" style={{ color: TEXT_MUTED }}>
             <Loader2 size={13} className="animate-spin" /> Pensando...
