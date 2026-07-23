@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Plus, X, Trash2, ChevronLeft, FileText, CalendarDays,
   CheckSquare, Square, Loader2, FolderOpen, LogOut, Link2, CalendarCheck,
-  Sparkles, Send
+  Sparkles, Send, Pencil
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import Login from "./Login";
@@ -67,6 +67,64 @@ function ProjectCard({ project, onOpen }) {
     </button>
   );
 }
+
+function ProjectHeader({ project, onUpdate }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(project.name);
+  const [color, setColor] = useState(project.color);
+
+  const save = async () => {
+    if (!name.trim()) return;
+    const ok = await onUpdate(project.id, { name: name.trim(), color });
+    if (ok) setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="mb-4 p-3 rounded-lg flex flex-col gap-3" style={{ background: SURFACE2 }}>
+        <input
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && save()}
+          className="px-3 py-2 rounded-md text-sm outline-none"
+          style={{ background: PAPER, color: INK_ON_PAPER }}
+        />
+        <div className="flex items-center gap-2 flex-wrap">
+          {PALETTE.map((c) => (
+            <button
+              key={c.hex}
+              onClick={() => setColor(c.hex)}
+              title={c.name}
+              className="w-7 h-7 rounded-full"
+              style={{ background: c.hex, outline: color === c.hex ? `2px solid ${TEXT_LIGHT}` : "none", outlineOffset: "2px" }}
+            />
+          ))}
+          <div className="flex-1" />
+          <button onClick={() => setEditing(false)} className="text-xs px-2 py-1.5" style={{ color: TEXT_MUTED }}>
+            Cancelar
+          </button>
+          <button onClick={save} className="text-xs px-3 py-1.5 rounded-md" style={{ background: color, color: "#fff" }}>
+            Guardar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 mb-4 group">
+      <span className="w-2.5 h-2.5 rounded-full" style={{ background: project.color }} />
+      <h2 className="text-lg font-serif" style={{ color: TEXT_LIGHT }}>
+        {project.name}
+      </h2>
+      <button onClick={() => setEditing(true)} className="opacity-0 group-hover:opacity-100" style={{ color: TEXT_MUTED }}>
+        <Pencil size={13} />
+      </button>
+    </div>
+  );
+}
+
 
 function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, color }) {
   const [openId, setOpenId] = useState(null);
@@ -190,7 +248,80 @@ function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, color }) {
   );
 }
 
-function TasksPanel({ tasks, onAdd, onToggle, onDelete, color }) {
+function TaskRow({ t, onToggle, onDelete, onUpdate, color, today, done }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(t.text);
+  const [dueDate, setDueDate] = useState(t.due_date || "");
+
+  const save = async () => {
+    if (!text.trim()) return;
+    const ok = await onUpdate(t.id, { text: text.trim(), due_date: dueDate || null });
+    if (ok) setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="flex flex-col gap-1.5 p-2 rounded-md" style={{ background: SURFACE2 }}>
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && save()}
+          className="px-2 py-1.5 rounded text-sm outline-none"
+          style={{ background: PAPER, color: INK_ON_PAPER }}
+        />
+        <input
+          type="date"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+          className="px-2 py-1.5 rounded text-sm outline-none self-start"
+          style={{ background: PAPER, color: INK_ON_PAPER }}
+        />
+        <div className="flex gap-2 justify-end">
+          <button onClick={() => setEditing(false)} className="text-xs px-2 py-1" style={{ color: TEXT_MUTED }}>
+            Cancelar
+          </button>
+          <button onClick={save} className="text-xs px-3 py-1 rounded" style={{ background: color, color: "#fff" }}>
+            Guardar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const isOverdue = !done && t.due_date && t.due_date < today;
+  const isToday = !done && t.due_date && t.due_date === today;
+
+  return (
+    <div className="flex items-start gap-2 p-2 rounded-md group" style={{ background: done ? "transparent" : SURFACE2 }}>
+      <button onClick={() => onToggle(t)} className="mt-0.5 shrink-0" style={{ color }}>
+        {done ? <CheckSquare size={16} /> : <Square size={16} />}
+      </button>
+      <div className="flex-1 min-w-0">
+        <span className="text-sm" style={{ color: done ? TEXT_MUTED : TEXT_LIGHT, textDecoration: done ? "line-through" : "none" }}>
+          {t.text}
+        </span>
+        {t.due_date && !done && (
+          <div className="text-[11px] font-mono mt-0.5" style={{ color: isOverdue ? "#e0836f" : isToday ? color : TEXT_MUTED }}>
+            {isOverdue ? "vencida · " : ""}
+            {t.due_date.slice(5).replace("-", "/")}
+          </div>
+        )}
+      </div>
+      <button
+        onClick={() => setEditing(true)}
+        className="opacity-0 group-hover:opacity-100 shrink-0"
+        style={{ color: TEXT_MUTED }}
+      >
+        <Pencil size={13} />
+      </button>
+      <button onClick={() => onDelete(t.id)} className="opacity-0 group-hover:opacity-100 shrink-0" style={{ color: TEXT_MUTED }}>
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
+function TasksPanel({ tasks, onAdd, onToggle, onDelete, onUpdate, color }) {
   const [text, setText] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [showDate, setShowDate] = useState(false);
@@ -252,66 +383,103 @@ function TasksPanel({ tasks, onAdd, onToggle, onDelete, color }) {
             Sin tareas todavía.
           </p>
         )}
-        {pending.map((t) => {
-          const isOverdue = t.due_date && t.due_date < today;
-          const isToday = t.due_date && t.due_date === today;
-          return (
-            <div key={t.id} className="flex items-start gap-2 p-2 rounded-md group" style={{ background: SURFACE2 }}>
-              <button onClick={() => onToggle(t)} className="mt-0.5 shrink-0" style={{ color }}>
-                <Square size={16} />
-              </button>
-              <div className="flex-1 min-w-0">
-                <span className="text-sm" style={{ color: TEXT_LIGHT }}>
-                  {t.text}
-                </span>
-                {t.due_date && (
-                  <div
-                    className="text-[11px] font-mono mt-0.5"
-                    style={{ color: isOverdue ? "#e0836f" : isToday ? color : TEXT_MUTED }}
-                  >
-                    {isOverdue ? "vencida · " : ""}
-                    {t.due_date.slice(5).replace("-", "/")}
-                  </div>
-                )}
-              </div>
-              <button
-                onClick={() => onDelete(t.id)}
-                className="opacity-0 group-hover:opacity-100 shrink-0"
-                style={{ color: TEXT_MUTED }}
-              >
-                <X size={14} />
-              </button>
-            </div>
-          );
-        })}
+        {pending.map((t) => (
+          <TaskRow key={t.id} t={t} onToggle={onToggle} onDelete={onDelete} onUpdate={onUpdate} color={color} today={today} done={false} />
+        ))}
         {done.length > 0 && (
           <div className="text-xs mt-2 mb-1" style={{ color: TEXT_MUTED }}>
             Hechas
           </div>
         )}
         {done.map((t) => (
-          <div key={t.id} className="flex items-start gap-2 p-2 rounded-md group">
-            <button onClick={() => onToggle(t)} className="mt-0.5 shrink-0" style={{ color }}>
-              <CheckSquare size={16} />
-            </button>
-            <span className="text-sm flex-1 line-through" style={{ color: TEXT_MUTED }}>
-              {t.text}
-            </span>
-            <button
-              onClick={() => onDelete(t.id)}
-              className="opacity-0 group-hover:opacity-100 shrink-0"
-              style={{ color: TEXT_MUTED }}
-            >
-              <X size={14} />
-            </button>
-          </div>
+          <TaskRow key={t.id} t={t} onToggle={onToggle} onDelete={onDelete} onUpdate={onUpdate} color={color} today={today} done={true} />
         ))}
       </div>
     </div>
   );
 }
 
-function AgendaPanel({ events, onAdd, onDelete, color }) {
+function EventRow({ ev, onDelete, onUpdate, color, today }) {
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(ev.title);
+  const [date, setDate] = useState(ev.date);
+  const [time, setTime] = useState(ev.time || "");
+
+  const save = async () => {
+    if (!title.trim() || !date) return;
+    const ok = await onUpdate(ev.id, { title: title.trim(), date, time: time || null });
+    if (ok) setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="p-3 rounded-md flex flex-col gap-2" style={{ background: PAPER }}>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className="px-2 py-1.5 rounded text-sm outline-none"
+          style={{ background: "#fff", color: INK_ON_PAPER }}
+        />
+        <div className="flex gap-2">
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="flex-1 px-2 py-1.5 rounded text-sm outline-none"
+            style={{ background: "#fff", color: INK_ON_PAPER }}
+          />
+          <input
+            type="time"
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+            className="px-2 py-1.5 rounded text-sm outline-none"
+            style={{ background: "#fff", color: INK_ON_PAPER }}
+          />
+        </div>
+        <div className="flex gap-2 justify-end">
+          <button onClick={() => setEditing(false)} className="text-xs px-2 py-1" style={{ color: "#6b6252" }}>
+            Cancelar
+          </button>
+          <button onClick={save} className="text-xs px-3 py-1.5 rounded" style={{ background: color, color: "#fff" }}>
+            Guardar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const isPast = ev.date < today;
+  const isToday = ev.date === today;
+
+  return (
+    <div className="flex items-center gap-3 p-2.5 rounded-md group" style={{ background: SURFACE2 }}>
+      <div
+        className="text-center shrink-0 px-2 py-1 rounded"
+        style={{ background: isToday ? color : isPast ? "#4a4038" : SURFACE, minWidth: "50px" }}
+      >
+        <div className="text-[10px] uppercase tracking-wide font-mono" style={{ color: "#fff" }}>
+          {ev.date.slice(5).replace("-", "/")}
+        </div>
+        {ev.time && (
+          <div className="text-[10px] font-mono" style={{ color: "#fff" }}>
+            {ev.time}
+          </div>
+        )}
+      </div>
+      <span className="text-sm flex-1" style={{ color: isPast ? TEXT_MUTED : TEXT_LIGHT }}>
+        {ev.title}
+      </span>
+      <button onClick={() => setEditing(true)} className="opacity-0 group-hover:opacity-100 shrink-0" style={{ color: TEXT_MUTED }}>
+        <Pencil size={13} />
+      </button>
+      <button onClick={() => onDelete(ev.id)} className="opacity-0 group-hover:opacity-100 shrink-0" style={{ color: TEXT_MUTED }}>
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
+function AgendaPanel({ events, onAdd, onDelete, onUpdate, color }) {
   const [title, setTitle] = useState("");
   const [date, setDate] = useState(todayISO());
   const [time, setTime] = useState("");
@@ -381,41 +549,14 @@ function AgendaPanel({ events, onAdd, onDelete, color }) {
             Agenda vacía.
           </p>
         )}
-        {sorted.map((ev) => {
-          const isPast = ev.date < today;
-          const isToday = ev.date === today;
-          return (
-            <div key={ev.id} className="flex items-center gap-3 p-2.5 rounded-md group" style={{ background: SURFACE2 }}>
-              <div
-                className="text-center shrink-0 px-2 py-1 rounded"
-                style={{ background: isToday ? color : isPast ? "#4a4038" : SURFACE, minWidth: "50px" }}
-              >
-                <div className="text-[10px] uppercase tracking-wide font-mono" style={{ color: "#fff" }}>
-                  {ev.date.slice(5).replace("-", "/")}
-                </div>
-                {ev.time && (
-                  <div className="text-[10px] font-mono" style={{ color: "#fff" }}>
-                    {ev.time}
-                  </div>
-                )}
-              </div>
-              <span className="text-sm flex-1" style={{ color: isPast ? TEXT_MUTED : TEXT_LIGHT }}>
-                {ev.title}
-              </span>
-              <button
-                onClick={() => onDelete(ev.id)}
-                className="opacity-0 group-hover:opacity-100 shrink-0"
-                style={{ color: TEXT_MUTED }}
-              >
-                <X size={14} />
-              </button>
-            </div>
-          );
-        })}
+        {sorted.map((ev) => (
+          <EventRow key={ev.id} ev={ev} onDelete={onDelete} onUpdate={onUpdate} color={color} today={today} />
+        ))}
       </div>
     </div>
   );
 }
+
 
 function AskClaudePanel({ projectId, color, onCreated }) {
   const [question, setQuestion] = useState("");
@@ -669,6 +810,16 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     setConfirmDelete(false);
   }
 
+  async function updateProject(id, patch) {
+    setProjects((p) => p.map((proj) => (proj.id === id ? { ...proj, ...patch } : proj)));
+    const { error } = await supabase.from("projects").update(patch).eq("id", id);
+    if (error) {
+      setSaveError("No se pudo actualizar el proyecto: " + (error.message || "error desconocido"));
+      return false;
+    }
+    return true;
+  }
+
   function openProject(id) {
     setActiveId(id);
     setView("project");
@@ -762,6 +913,19 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     setProjectData((pd) => ({ ...pd, [activeId]: { ...pd[activeId], tasks: pd[activeId].tasks.filter((t) => t.id !== id) } }));
   }
 
+  async function updateTask(id, patch) {
+    setProjectData((pd) => ({
+      ...pd,
+      [activeId]: { ...pd[activeId], tasks: pd[activeId].tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)) },
+    }));
+    const { error } = await supabase.from("tasks").update(patch).eq("id", id);
+    if (error) {
+      setSaveError("No se pudo actualizar la tarea: " + (error.message || "error desconocido"));
+      return false;
+    }
+    return true;
+  }
+
   async function addEvent(title, date, time) {
     const { data: ev, error } = await supabase
       .from("events")
@@ -814,6 +978,35 @@ function LegajoApp({ userId, userEmail, onLogout }) {
         // si falla, el evento ya se ha borrado en Legajo; quedará huérfano en Google
       }
     }
+  }
+
+  async function updateEvent(id, patch) {
+    const before = (projectData[activeId]?.events || []).find((e) => e.id === id);
+    setProjectData((pd) => ({
+      ...pd,
+      [activeId]: { ...pd[activeId], events: pd[activeId].events.map((e) => (e.id === id ? { ...e, ...patch } : e)) },
+    }));
+    const { error } = await supabase.from("events").update(patch).eq("id", id);
+    if (error) {
+      setSaveError("No se pudo actualizar la cita: " + (error.message || "error desconocido"));
+      return false;
+    }
+    if (googleConnected && before?.google_event_id) {
+      try {
+        await callEdgeFunction("sync-calendar-event", {
+          action: "update",
+          event: {
+            google_event_id: before.google_event_id,
+            title: patch.title ?? before.title,
+            date: patch.date ?? before.date,
+            time: patch.time ?? before.time,
+          },
+        });
+      } catch (e) {
+        // si falla la sincronización, el cambio se queda igualmente guardado en Legajo
+      }
+    }
+    return true;
   }
 
   return (
@@ -961,13 +1154,8 @@ function LegajoApp({ userId, userEmail, onLogout }) {
               </button>
 
               <div className="rounded-xl p-4 md:p-6" style={{ background: SURFACE }}>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full" style={{ background: active.color }} />
-                    <h2 className="text-lg font-serif" style={{ color: TEXT_LIGHT }}>
-                      {active.name}
-                    </h2>
-                  </div>
+                <div className="flex items-start justify-between">
+                  <ProjectHeader project={active} onUpdate={updateProject} />
                   {!confirmDelete ? (
                     <button onClick={() => setConfirmDelete(true)} className="text-xs flex items-center gap-1" style={{ color: TEXT_MUTED }}>
                       <Trash2 size={13} /> Eliminar proyecto
@@ -995,13 +1183,13 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                       <div className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>
                         <CheckSquare size={13} /> Tareas
                       </div>
-                      <TasksPanel tasks={data.tasks} onAdd={addTask} onToggle={toggleTask} onDelete={deleteTask} color={active.color} />
+                      <TasksPanel tasks={data.tasks} onAdd={addTask} onToggle={toggleTask} onDelete={deleteTask} onUpdate={updateTask} color={active.color} />
                     </div>
                     <div className="flex flex-col" style={{ minHeight: 320 }}>
                       <div className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>
                         <CalendarDays size={13} /> Agenda
                       </div>
-                      <AgendaPanel events={data.events} onAdd={addEvent} onDelete={deleteEvent} color={active.color} />
+                      <AgendaPanel events={data.events} onAdd={addEvent} onDelete={deleteEvent} onUpdate={updateEvent} color={active.color} />
                     </div>
                     <div className="flex flex-col" style={{ minHeight: 320 }}>
                       <div className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>

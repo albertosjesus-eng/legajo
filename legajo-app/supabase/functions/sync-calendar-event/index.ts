@@ -84,6 +84,18 @@ export default {
         return Response.json({ google_event_id: data.id });
       }
 
+      if (action === "update") {
+        if (!event.google_event_id) return Response.json({ error: "missing_google_event_id" });
+        const res = await fetch(`${base}/${event.google_event_id}`, {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify(buildGoogleEventBody(event)),
+        });
+        const data = await res.json();
+        if (!res.ok) return Response.json({ error: "google_api_error", detail: data });
+        return Response.json({ ok: true });
+      }
+
       if (action === "delete") {
         if (!event.google_event_id) return Response.json({ ok: true });
         await fetch(`${base}/${event.google_event_id}`, {
