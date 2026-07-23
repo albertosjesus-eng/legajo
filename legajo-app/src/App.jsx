@@ -384,7 +384,7 @@ function AgendaPanel({ events, onAdd, onDelete, color }) {
   );
 }
 
-function AskClaudePanel({ projectId, color }) {
+function AskClaudePanel({ projectId, color, onCreated }) {
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [lastQA, setLastQA] = useState(null);
@@ -405,7 +405,8 @@ function AskClaudePanel({ projectId, color }) {
           : `HTTP ${status}`;
         setError("No se pudo obtener respuesta (" + detail + ").");
       } else {
-        setLastQA({ question: q, answer: data.answer });
+        setLastQA({ question: q, answer: data.answer, created: data.created || [] });
+        if (data.created && data.created.length > 0) onCreated();
       }
     } catch (e) {
       setError("No se pudo obtener respuesta. Inténtalo de nuevo.");
@@ -432,6 +433,11 @@ function AskClaudePanel({ projectId, color }) {
             <div className="text-sm px-3 py-2 rounded-md whitespace-pre-wrap" style={{ background: PAPER, color: INK_ON_PAPER }}>
               {lastQA.answer}
             </div>
+            {lastQA.created && lastQA.created.length > 0 && (
+              <div className="text-xs self-start px-2 py-1 rounded" style={{ background: SURFACE2, color: "#8fae7c" }}>
+                ✓ {lastQA.created.length} elemento{lastQA.created.length > 1 ? "s" : ""} creado{lastQA.created.length > 1 ? "s" : ""} en el proyecto
+              </div>
+            )}
           </div>
         )}
         {loading && (
@@ -948,7 +954,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                       <div className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>
                         <Sparkles size={13} /> Preguntar a Claude
                       </div>
-                      <AskClaudePanel projectId={active.id} color={active.color} />
+                      <AskClaudePanel projectId={active.id} color={active.color} onCreated={() => loadProjectData(active.id)} />
                     </div>
                   </div>
                 )}
