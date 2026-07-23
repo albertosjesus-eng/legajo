@@ -70,15 +70,30 @@ function ProjectCard({ project, onOpen }) {
 
 function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, color }) {
   const [openId, setOpenId] = useState(null);
+  const [saveState, setSaveState] = useState("idle"); // idle | saving | saved | error
+  const [saveMsg, setSaveMsg] = useState("");
   const openNote = notes.find((n) => n.id === openId);
+
+  const handleSave = async () => {
+    setSaveState("saving");
+    const result = await onFlush(openId);
+    if (result?.ok) {
+      setSaveState("saved");
+      setTimeout(() => setSaveState("idle"), 1500);
+    } else {
+      setSaveState("error");
+      setSaveMsg(result?.error || "error desconocido");
+    }
+  };
 
   if (openId && openNote) {
     return (
       <div className="flex flex-col h-full">
         <button
-          onClick={() => {
-            onFlush(openId);
+          onClick={async () => {
+            await onFlush(openId);
             setOpenId(null);
+            setSaveState("idle");
           }}
           className="flex items-center gap-1 text-xs mb-3 self-start"
           style={{ color: TEXT_MUTED }}
@@ -100,7 +115,12 @@ function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, color }) {
             className="flex-1 bg-transparent border-none outline-none resize-none text-sm leading-relaxed"
             style={{ color: INK_ON_PAPER, minHeight: "220px" }}
           />
-          <div className="flex justify-end mt-2">
+          {saveState === "error" && (
+            <div className="text-xs mb-2 px-2 py-1.5 rounded" style={{ background: "#f3d9d0", color: "#8a3b2a" }}>
+              No se pudo guardar: {saveMsg}
+            </div>
+          )}
+          <div className="flex justify-between items-center mt-2">
             <button
               onClick={() => {
                 onDelete(openId);
@@ -110,6 +130,15 @@ function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, color }) {
               style={{ color: "#8a3b2a" }}
             >
               <Trash2 size={12} /> Eliminar nota
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saveState === "saving"}
+              className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-md"
+              style={{ background: color, color: "#fff", opacity: saveState === "saving" ? 0.7 : 1 }}
+            >
+              {saveState === "saving" && <Loader2 size={12} className="animate-spin" />}
+              {saveState === "saved" ? "Guardado ✓" : saveState === "saving" ? "Guardando..." : "Guardar"}
             </button>
           </div>
         </div>
@@ -675,12 +704,14 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   async function flushNote(id) {
     clearTimeout(noteTimers.current[id]);
     const pending = notePending.current[id];
-    if (!pending) return;
+    if (!pending) return { ok: true, noChanges: true };
     delete notePending.current[id];
     const { error } = await supabase.from("notes").update({ ...pending, updated_at: new Date().toISOString() }).eq("id", id);
     if (error) {
       setSaveError("No se pudo guardar la nota: " + (error.message || "error desconocido"));
+      return { ok: false, error: error.message };
     }
+    return { ok: true };
   }
 
   function flushAllNotes() {
