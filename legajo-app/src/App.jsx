@@ -506,6 +506,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   const [newColor, setNewColor] = useState(PALETTE[0].hex);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [noteSaveError, setNoteSaveError] = useState("");
   const [googleConnected, setGoogleConnected] = useState(false);
   const [connectingGoogle, setConnectingGoogle] = useState(false);
   const [calendarNotice, setCalendarNotice] = useState(null);
@@ -667,12 +668,15 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     noteTimers.current[id] = setTimeout(() => flushNote(id), 500);
   }
 
-  function flushNote(id) {
+  async function flushNote(id) {
     clearTimeout(noteTimers.current[id]);
     const pending = notePending.current[id];
     if (!pending) return;
     delete notePending.current[id];
-    supabase.from("notes").update({ ...pending, updated_at: new Date().toISOString() }).eq("id", id);
+    const { error } = await supabase.from("notes").update({ ...pending, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) {
+      setNoteSaveError(error.message || "error desconocido al guardar la nota");
+    }
   }
 
   function flushAllNotes() {
@@ -826,6 +830,18 @@ function LegajoApp({ userId, userEmail, onLogout }) {
         {loadError && (
           <div className="mb-4 px-3 py-2 rounded-md text-xs" style={{ background: "#4a2b23", color: "#f2d9d0" }}>
             {loadError}
+          </div>
+        )}
+
+        {noteSaveError && (
+          <div
+            className="mb-4 px-3 py-2 rounded-md text-xs flex items-center justify-between"
+            style={{ background: "#4a2b23", color: "#f2d9d0" }}
+          >
+            <span>No se pudo guardar la nota: {noteSaveError}</span>
+            <button onClick={() => setNoteSaveError("")} style={{ color: "inherit" }}>
+              <X size={13} />
+            </button>
           </div>
         )}
 
