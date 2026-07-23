@@ -355,10 +355,24 @@ function AskClaudePanel({ projectId, color }) {
       const { data, error: fnError } = await supabase.functions.invoke("ask-claude", {
         body: { project_id: projectId, question: q },
       });
-      if (fnError || data?.error) {
-        setError(
-          "No se pudo obtener respuesta (" + (data?.error || fnError?.message || "error desconocido") + ")."
-        );
+
+      if (fnError) {
+        // supabase-js oculta el cuerpo real de la respuesta de error dentro de
+        // fnError.context (un Response sin leer). Lo intentamos leer nosotros.
+        let detail = fnError.message || "error desconocido";
+        try {
+          if (fnError.context && typeof fnError.context.json === "function") {
+            const body = await fnError.context.json();
+            if (body?.error) {
+              detail = body.error + (body.detail ? ": " + (typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail)) : "");
+            }
+          }
+        } catch (parseErr) {
+          // si no se puede leer, nos quedamos con el mensaje genérico
+        }
+        setError("No se pudo obtener respuesta (" + detail + ").");
+      } else if (data?.error) {
+        setError("No se pudo obtener respuesta (" + data.error + (data.detail ? ": " + JSON.stringify(data.detail) : "") + ").");
       } else {
         setHistory((h) => [...h, { question: q, answer: data.answer }]);
       }
