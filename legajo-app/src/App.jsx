@@ -824,18 +824,6 @@ function TimelineView({ projects, timelineData, loading, onOpen }) {
           Todavía no hay tareas, citas o notas en ningún proyecto.
         </p>
       )}
-      {noDate.length > 0 && (
-        <div>
-          <div className="text-xs uppercase tracking-wide mb-2" style={{ color: TEXT_MUTED }}>
-            Sin fecha
-          </div>
-          <div className="flex flex-col gap-1.5">
-            {noDate.map((e) => (
-              <TimelineEntry key={e.id} entry={e} onOpen={onOpen} />
-            ))}
-          </div>
-        </div>
-      )}
       {upcoming.length > 0 && (
         <div>
           <div className="text-xs uppercase tracking-wide mb-2" style={{ color: TEXT_MUTED }}>
@@ -843,6 +831,18 @@ function TimelineView({ projects, timelineData, loading, onOpen }) {
           </div>
           <div className="flex flex-col gap-1.5">
             {upcoming.map((e) => (
+              <TimelineEntry key={e.id} entry={e} onOpen={onOpen} />
+            ))}
+          </div>
+        </div>
+      )}
+      {noDate.length > 0 && (
+        <div>
+          <div className="text-xs uppercase tracking-wide mb-2" style={{ color: TEXT_MUTED }}>
+            Sin fecha
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {noDate.map((e) => (
               <TimelineEntry key={e.id} entry={e} onOpen={onOpen} />
             ))}
           </div>
