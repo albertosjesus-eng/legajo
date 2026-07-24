@@ -314,7 +314,10 @@ function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, onSaveDrawing, 
 
   if (openId && openNote) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-10" style={{ background: "rgba(0,0,0,0.6)" }}>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-10"
+        style={{ background: "rgba(0,0,0,0.6)", paddingTop: "calc(env(safe-area-inset-top) + 0.75rem)" }}
+      >
         <div
           className="w-full max-w-3xl rounded-xl p-4 md:p-6 flex flex-col"
           style={{ background: "#000000", maxHeight: "92vh", height: "92vh" }}
@@ -1650,7 +1653,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   }
 
   return (
-    <div className="w-full min-h-screen flex justify-center" style={{ background: INK }}>
+    <div className="w-full min-h-screen flex justify-center" style={{ background: INK, paddingTop: "env(safe-area-inset-top)" }}>
       <div className="w-full max-w-6xl px-4 py-6 md:px-8 md:py-8">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-2">
@@ -2078,7 +2081,7 @@ export default function App() {
 
   if (session === undefined) {
     return (
-      <div className="w-full min-h-screen flex items-center justify-center" style={{ background: INK }}>
+      <div className="w-full min-h-screen flex items-center justify-center" style={{ background: INK, paddingTop: "env(safe-area-inset-top)" }}>
         <Loader2 size={20} className="animate-spin" style={{ color: TEXT_MUTED }} />
       </div>
     );

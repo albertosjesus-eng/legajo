@@ -35,7 +35,7 @@ export default function Login() {
   };
 
   return (
-    <div className="w-full min-h-screen flex items-center justify-center px-4" style={{ background: INK }}>
+    <div className="w-full min-h-screen flex items-center justify-center px-4" style={{ background: INK, paddingTop: "env(safe-area-inset-top)" }}>
       <div className="w-full max-w-sm p-6 rounded-lg" style={{ background: SURFACE2 }}>
         <div className="flex items-center gap-2 mb-6 justify-center">
           <FolderOpen size={22} style={{ color: TEXT_LIGHT }} />
