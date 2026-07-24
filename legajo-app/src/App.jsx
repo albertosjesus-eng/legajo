@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Plus, X, Trash2, ChevronLeft, FileText, CalendarDays,
   CheckSquare, Square, Loader2, FolderOpen, LogOut, Link2, CalendarCheck,
-  Sparkles, Send, Pencil, History, Archive, ArchiveRestore, Search, Download, PenTool, Clock
+  Sparkles, Send, Pencil, History, Archive, ArchiveRestore, Search, Download, PenTool, Clock, Menu
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import Login from "./Login";
@@ -803,7 +803,7 @@ function AskClaudePanel({ projectId, color, onCreated }) {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col">
       <div className="flex gap-2 mb-3">
         <input
           value={question}
@@ -827,7 +827,7 @@ function AskClaudePanel({ projectId, color, onCreated }) {
           {error}
         </div>
       )}
-      <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
+      <div className="flex flex-col gap-2">
         {!lastQA && !loading && (
           <p className="text-sm" style={{ color: TEXT_MUTED }}>
             El asistente responde aquí, de forma breve, a tu última pregunta.
@@ -1193,6 +1193,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   const [loadingTimeline, setLoadingTimeline] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [projectData, setProjectData] = useState({});
   const [loadingIndex, setLoadingIndex] = useState(true);
   const [loadingProject, setLoadingProject] = useState(false);
@@ -1658,7 +1659,9 @@ function LegajoApp({ userId, userEmail, onLogout }) {
               Legajo
             </h1>
           </div>
-          <div className="flex items-center gap-3">
+
+          {/* Pantallas anchas (iPad/escritorio): fila completa de botones */}
+          <div className="hidden md:flex items-center gap-3">
             {googleConnected ? (
               <span className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-md" style={{ background: SURFACE2, color: "#8fae7c" }}>
                 <CalendarCheck size={14} /> Google Calendar conectado
@@ -1715,8 +1718,91 @@ function LegajoApp({ userId, userEmail, onLogout }) {
               <LogOut size={15} />
             </button>
           </div>
+
+          {/* Pantallas estrechas (iPhone): botón de menú agrupado */}
+          <button
+            onClick={() => setMobileMenuOpen((o) => !o)}
+            className="md:hidden p-2 rounded-md"
+            style={{ background: SURFACE2, color: TEXT_LIGHT }}
+          >
+            {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
+          </button>
         </div>
 
+        {mobileMenuOpen && (
+          <div className="md:hidden mb-6 rounded-lg p-2 flex flex-col gap-1" style={{ background: SURFACE2 }}>
+            {googleConnected ? (
+              <span className="flex items-center gap-2 text-sm px-3 py-2.5 rounded-md" style={{ color: "#8fae7c" }}>
+                <CalendarCheck size={16} /> Google Calendar conectado
+              </span>
+            ) : (
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  connectGoogleCalendar();
+                }}
+                disabled={connectingGoogle}
+                className="flex items-center gap-2 text-sm px-3 py-2.5 rounded-md text-left"
+                style={{ color: TEXT_LIGHT }}
+              >
+                <Link2 size={16} /> Conectar Google Calendar
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setMobileMenuOpen(false);
+                exportAll();
+              }}
+              className="flex items-center gap-2 text-sm px-3 py-2.5 rounded-md text-left"
+              style={{ color: TEXT_LIGHT }}
+            >
+              <Download size={16} /> Exportar
+            </button>
+            <button
+              onClick={() => {
+                setMobileMenuOpen(false);
+                setView("search");
+                if (!timelineData) loadTimeline();
+              }}
+              className="flex items-center gap-2 text-sm px-3 py-2.5 rounded-md text-left"
+              style={{ color: TEXT_LIGHT }}
+            >
+              <Search size={16} /> Buscar
+            </button>
+            <button
+              onClick={() => {
+                setMobileMenuOpen(false);
+                setView("timeline");
+                loadTimeline();
+              }}
+              className="flex items-center gap-2 text-sm px-3 py-2.5 rounded-md text-left"
+              style={{ color: TEXT_LIGHT }}
+            >
+              <History size={16} /> Ver cronología
+            </button>
+            <button
+              onClick={() => {
+                setMobileMenuOpen(false);
+                setShowNewProject((s) => !s);
+              }}
+              className="flex items-center gap-2 text-sm px-3 py-2.5 rounded-md text-left"
+              style={{ color: TEXT_LIGHT }}
+            >
+              <Plus size={16} /> Nuevo proyecto
+            </button>
+            <div className="my-1" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }} />
+            <button
+              onClick={() => {
+                setMobileMenuOpen(false);
+                onLogout();
+              }}
+              className="flex items-center gap-2 text-sm px-3 py-2.5 rounded-md text-left"
+              style={{ color: TEXT_MUTED }}
+            >
+              <LogOut size={16} /> Cerrar sesión
+            </button>
+          </div>
+        )}
         {calendarNotice && (
           <div
             className="mb-4 px-3 py-2 rounded-md text-xs flex items-center justify-between"

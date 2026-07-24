@@ -10,7 +10,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "jsr:@supabase/server@^1";
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
-const MAX_TOOL_ITERATIONS = 5;
+const MAX_TOOL_ITERATIONS = 8;
 
 type NoteRow = { title: string | null; body: string | null };
 type TaskRow = { text: string; done: boolean; due_date: string | null };
@@ -119,7 +119,7 @@ export default {
       lines.push("");
       lines.push(`Notas (${notes.length}):`);
       if (notes.length === 0) lines.push("(ninguna)");
-      notes.forEach((n) => lines.push(`- ${n.title || "(sin título)"}: ${(n.body || "").slice(0, 600)}`));
+      notes.forEach((n) => lines.push(`- ${n.title || "(sin título)"}: ${n.body || ""}`));
       lines.push("");
       lines.push(`Tareas (${tasks.length}):`);
       if (tasks.length === 0) lines.push("(ninguna)");
@@ -157,6 +157,8 @@ export default {
       // deno-lint-ignore no-explicit-any
       const created: any[] = [];
       let finalText = "";
+      let stoppedCleanly = false;
+      let lastStopReason = "";
 
       for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
         const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
@@ -168,7 +170,7 @@ export default {
           },
           body: JSON.stringify({
             model: "claude-sonnet-5",
-            max_tokens: 1024,
+            max_tokens: 4096,
             system: systemPrompt,
             tools,
             messages,
@@ -177,14 +179,21 @@ export default {
 
         const data = await anthropicRes.json();
         if (!anthropicRes.ok) return Response.json({ error: "anthropic_error", detail: data });
+        lastStopReason = data.stop_reason || "";
 
-        finalText = (data.content || [])
+        // Solo actualizamos si hay texto real, para no pisar una respuesta ya buena
+        // con un turno posterior que solo llamó a herramientas sin añadir texto.
+        const textNow = (data.content || [])
           .filter((b: { type: string }) => b.type === "text")
           .map((b: { text: string }) => b.text)
           .join("\n");
+        if (textNow) finalText = textNow;
 
         const toolUses = (data.content || []).filter((b: { type: string }) => b.type === "tool_use");
-        if (toolUses.length === 0 || data.stop_reason !== "tool_use") break;
+        if (toolUses.length === 0 || data.stop_reason !== "tool_use") {
+          stoppedCleanly = true;
+          break;
+        }
 
         messages.push({ role: "assistant", content: data.content });
 
@@ -195,6 +204,16 @@ export default {
           toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(result) });
         }
         messages.push({ role: "user", content: toolResults });
+      }
+
+      if (!finalText) {
+        if (created.length > 0) {
+          finalText = `He creado ${created.length} elemento${created.length > 1 ? "s" : ""} en el proyecto.`;
+        } else if (!stoppedCleanly) {
+          finalText = "La petición necesitaba demasiados pasos y se ha detenido antes de terminar. Prueba a pedir menos cosas a la vez.";
+        } else {
+          finalText = `No he podido generar una respuesta de texto (motivo: ${lastStopReason || "desconocido"}), aunque la petición se ha procesado.`;
+        }
       }
 
       return Response.json({ answer: finalText, created });
