@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Plus, X, Trash2, ChevronLeft, FileText, CalendarDays,
   CheckSquare, Square, Loader2, FolderOpen, LogOut, Link2, CalendarCheck,
-  Sparkles, Send, Pencil, History, Archive, ArchiveRestore, Search, Download
+  Sparkles, Send, Pencil, History, Archive, ArchiveRestore, Search, Download, PenTool, Clock
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import Login from "./Login";
@@ -177,59 +177,219 @@ function ProjectHeader({ project, onUpdate }) {
 }
 
 
-function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, color }) {
+function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, onSaveDrawing, onLoadDrawing, color }) {
   const [openId, setOpenId] = useState(null);
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved | error
   const [saveMsg, setSaveMsg] = useState("");
+  const [drawMode, setDrawMode] = useState(false);
   const openNote = notes.find((n) => n.id === openId);
+
+  const canvasRef = useRef(null);
+  const bodyRef = useRef(null);
+  const containerRef = useRef(null);
+  const ctxRef = useRef(null);
+  const hasStrokesRef = useRef(false);
+  const drawingRef = useRef(false);
+  const lastPointRef = useRef(null);
+
+  useEffect(() => {
+    if (!openId) return;
+    setDrawMode(false);
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
+    const rect = container.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    canvas.style.width = rect.width + "px";
+    canvas.style.height = rect.height + "px";
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = INK_ON_PAPER;
+    ctxRef.current = ctx;
+    hasStrokesRef.current = false;
+
+    if (openNote?.has_drawing && onLoadDrawing) {
+      onLoadDrawing(openId).then((url) => {
+        if (!url || !ctxRef.current) return;
+        const img = new Image();
+        img.onload = () => {
+          ctxRef.current.drawImage(img, 0, 0, rect.width, rect.height);
+          hasStrokesRef.current = true;
+          URL.revokeObjectURL(url);
+        };
+        img.src = url;
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openId]);
+
+  const getPoint = (e) => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top, pressure: e.pressure || 0.5 };
+  };
+
+  const handlePointerDown = (e) => {
+    if (!drawMode) return;
+    e.preventDefault();
+    drawingRef.current = true;
+    lastPointRef.current = getPoint(e);
+    canvasRef.current.setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e) => {
+    if (!drawMode || !drawingRef.current) return;
+    e.preventDefault();
+    const ctx = ctxRef.current;
+    const point = getPoint(e);
+    const last = lastPointRef.current;
+    ctx.lineWidth = e.pointerType === "pen" ? Math.max(1, point.pressure * 5) : 2.5;
+    ctx.beginPath();
+    ctx.moveTo(last.x, last.y);
+    ctx.lineTo(point.x, point.y);
+    ctx.stroke();
+    lastPointRef.current = point;
+    hasStrokesRef.current = true;
+  };
+
+  const handlePointerUp = () => {
+    drawingRef.current = false;
+  };
+
+  const clearDrawing = () => {
+    const ctx = ctxRef.current;
+    const canvas = canvasRef.current;
+    if (!ctx || !canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+    hasStrokesRef.current = false;
+  };
+
+  const insertTimestamp = () => {
+    const el = bodyRef.current;
+    const now = new Date();
+    const stamp =
+      String(now.getDate()).padStart(2, "0") +
+      "/" +
+      String(now.getMonth() + 1).padStart(2, "0") +
+      "/" +
+      now.getFullYear() +
+      " " +
+      String(now.getHours()).padStart(2, "0") +
+      ":" +
+      String(now.getMinutes()).padStart(2, "0");
+    const text = `[${stamp}] `;
+    const current = openNote.body || "";
+    const start = el ? el.selectionStart : current.length;
+    const end = el ? el.selectionEnd : current.length;
+    const newBody = current.slice(0, start) + text + current.slice(end);
+    onUpdate(openId, { body: newBody });
+    const newPos = start + text.length;
+    setTimeout(() => {
+      if (el) {
+        el.focus();
+        el.setSelectionRange(newPos, newPos);
+      }
+    }, 0);
+  };
 
   const handleSave = async () => {
     setSaveState("saving");
-    const result = await onFlush(openId);
-    if (result?.ok) {
+    const textResult = await onFlush(openId);
+    let drawingResult = { ok: true };
+    if (onSaveDrawing && canvasRef.current) {
+      drawingResult = await onSaveDrawing(openId, canvasRef.current, hasStrokesRef.current);
+    }
+    if (textResult?.ok !== false && drawingResult?.ok) {
       setSaveState("saved");
       setTimeout(() => setSaveState("idle"), 1500);
     } else {
       setSaveState("error");
-      setSaveMsg(result?.error || "error desconocido");
+      setSaveMsg(drawingResult?.error || textResult?.error || "error desconocido");
     }
   };
 
   if (openId && openNote) {
     return (
-      <div className="flex flex-col h-full">
-        <button
-          onClick={async () => {
-            await onFlush(openId);
-            setOpenId(null);
-            setSaveState("idle");
-          }}
-          className="flex items-center gap-1 text-xs mb-3 self-start"
-          style={{ color: TEXT_MUTED }}
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-10" style={{ background: "rgba(0,0,0,0.6)" }}>
+        <div
+          className="w-full max-w-3xl rounded-xl p-4 md:p-6 flex flex-col"
+          style={{ background: PAPER, maxHeight: "92vh", height: "92vh" }}
         >
-          <ChevronLeft size={14} /> Volver a notas
-        </button>
-        <div className="rounded-lg p-3 flex-1 flex flex-col" style={{ background: PAPER }}>
-          <input
-            value={openNote.title}
-            onChange={(e) => onUpdate(openId, { title: e.target.value })}
-            placeholder="Título de la nota"
-            className="mb-2 bg-transparent border-none outline-none text-base font-serif"
-            style={{ color: INK_ON_PAPER }}
-          />
-          <textarea
-            value={openNote.body}
-            onChange={(e) => onUpdate(openId, { body: e.target.value })}
-            placeholder="Escribe aquí..."
-            className="flex-1 bg-transparent border-none outline-none resize-none text-sm leading-relaxed"
-            style={{ color: INK_ON_PAPER, minHeight: "220px" }}
-          />
+          <div className="flex items-center justify-between mb-2">
+            <button
+              onClick={async () => {
+                await onFlush(openId);
+                setOpenId(null);
+                setSaveState("idle");
+              }}
+              className="flex items-center gap-1 text-xs self-start"
+              style={{ color: "#6b6252" }}
+            >
+              <ChevronLeft size={14} /> Volver a notas
+            </button>
+            <div className="flex items-center gap-2">
+              {drawMode && (
+                <button onClick={clearDrawing} className="text-xs px-2.5 py-1.5 rounded-md" style={{ color: "#8a3b2a" }}>
+                  Borrar dibujo
+                </button>
+              )}
+              <button
+                onClick={() => setDrawMode((d) => !d)}
+                className="text-xs flex items-center gap-1.5 px-2.5 py-1.5 rounded-md"
+                style={{ background: drawMode ? color : "rgba(0,0,0,0.06)", color: drawMode ? "#fff" : "#6b6252" }}
+              >
+                <PenTool size={13} /> {drawMode ? "Dibujando" : "Dibujar"}
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 mb-3">
+            <input
+              value={openNote.title}
+              onChange={(e) => onUpdate(openId, { title: e.target.value })}
+              placeholder="Título de la nota"
+              className="flex-1 bg-transparent border-none outline-none text-xl font-serif"
+              style={{ color: INK_ON_PAPER }}
+            />
+            <button
+              onClick={insertTimestamp}
+              title="Insertar fecha y hora en el texto"
+              className="p-1.5 rounded-md shrink-0"
+              style={{ color: "#6b6252" }}
+            >
+              <Clock size={16} />
+            </button>
+          </div>
+          <div ref={containerRef} className="relative flex-1 min-h-0">
+            <textarea
+              ref={bodyRef}
+              autoFocus={!drawMode}
+              readOnly={drawMode}
+              value={openNote.body}
+              onChange={(e) => onUpdate(openId, { body: e.target.value })}
+              placeholder="Escribe aquí..."
+              className="absolute inset-0 bg-transparent border-none outline-none resize-none text-base leading-relaxed"
+              style={{ color: INK_ON_PAPER }}
+            />
+            <canvas
+              ref={canvasRef}
+              className="absolute inset-0"
+              style={{ touchAction: "none", pointerEvents: drawMode ? "auto" : "none" }}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerLeave={handlePointerUp}
+            />
+          </div>
           {saveState === "error" && (
             <div className="text-xs mb-2 px-2 py-1.5 rounded" style={{ background: "#f3d9d0", color: "#8a3b2a" }}>
               No se pudo guardar: {saveMsg}
             </div>
           )}
-          <div className="flex justify-between items-center mt-2">
+          <div className="flex justify-between items-center mt-3 pt-3" style={{ borderTop: "1px solid rgba(0,0,0,0.08)" }}>
             <button
               onClick={() => {
                 onDelete(openId);
@@ -243,7 +403,7 @@ function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, color }) {
             <button
               onClick={handleSave}
               disabled={saveState === "saving"}
-              className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-md"
+              className="text-xs flex items-center gap-1.5 px-4 py-2 rounded-md"
               style={{ background: color, color: "#fff", opacity: saveState === "saving" ? 0.7 : 1 }}
             >
               {saveState === "saving" && <Loader2 size={12} className="animate-spin" />}
@@ -283,8 +443,9 @@ function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, color }) {
               className="text-left p-3 rounded-md"
               style={{ background: PAPER }}
             >
-              <div className="font-serif text-sm truncate" style={{ color: INK_ON_PAPER }}>
-                {n.title || "Sin título"}
+              <div className="font-serif text-sm truncate flex items-center gap-1.5" style={{ color: INK_ON_PAPER }}>
+                {n.has_drawing && <PenTool size={11} style={{ color: "#6b6252", flexShrink: 0 }} />}
+                <span className="truncate">{n.title || "Sin título"}</span>
               </div>
               <div
                 className="text-xs mt-1 overflow-hidden"
@@ -641,7 +802,30 @@ function AskClaudePanel({ projectId, color, onCreated }) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1 mb-3">
+      <div className="flex gap-2 mb-3">
+        <input
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && ask()}
+          placeholder="Pregunta algo sobre este proyecto..."
+          className="flex-1 px-3 py-2 rounded-md text-sm outline-none"
+          style={{ background: PAPER, color: INK_ON_PAPER }}
+        />
+        <button
+          onClick={ask}
+          disabled={loading}
+          className="px-3 rounded-md"
+          style={{ background: color, color: "#fff", opacity: loading ? 0.7 : 1 }}
+        >
+          <Send size={16} />
+        </button>
+      </div>
+      {error && (
+        <div className="text-xs mb-2 px-3 py-2 rounded-md" style={{ background: "#4a2b23", color: "#f2d9d0" }}>
+          {error}
+        </div>
+      )}
+      <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
         {!lastQA && !loading && (
           <p className="text-sm" style={{ color: TEXT_MUTED }}>
             El asistente responde aquí, de forma breve, a tu última pregunta.
@@ -670,29 +854,6 @@ function AskClaudePanel({ projectId, color, onCreated }) {
             <Loader2 size={13} className="animate-spin" /> Pensando...
           </div>
         )}
-      </div>
-      {error && (
-        <div className="text-xs mb-2 px-3 py-2 rounded-md" style={{ background: "#4a2b23", color: "#f2d9d0" }}>
-          {error}
-        </div>
-      )}
-      <div className="flex gap-2">
-        <input
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && ask()}
-          placeholder="Pregunta algo sobre este proyecto..."
-          className="flex-1 px-3 py-2 rounded-md text-sm outline-none"
-          style={{ background: PAPER, color: INK_ON_PAPER }}
-        />
-        <button
-          onClick={ask}
-          disabled={loading}
-          className="px-3 rounded-md"
-          style={{ background: color, color: "#fff", opacity: loading ? 0.7 : 1 }}
-        >
-          <Send size={16} />
-        </button>
       </div>
     </div>
   );
@@ -1293,6 +1454,38 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     Object.keys(notePending.current).forEach((id) => flushNote(id));
   }
 
+  async function saveDrawing(noteId, canvas, hasStrokes) {
+    const path = `${userId}/${noteId}.png`;
+    if (!hasStrokes) {
+      await supabase.storage.from("note-drawings").remove([path]);
+      const { error } = await supabase.from("notes").update({ has_drawing: false }).eq("id", noteId);
+      if (error) return { ok: false, error: error.message };
+      setProjectData((pd) => ({
+        ...pd,
+        [activeId]: { ...pd[activeId], notes: pd[activeId].notes.map((n) => (n.id === noteId ? { ...n, has_drawing: false } : n)) },
+      }));
+      return { ok: true };
+    }
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) return { ok: false, error: "no se pudo generar la imagen" };
+    const { error: upErr } = await supabase.storage.from("note-drawings").upload(path, blob, { upsert: true, contentType: "image/png" });
+    if (upErr) return { ok: false, error: upErr.message };
+    const { error } = await supabase.from("notes").update({ has_drawing: true }).eq("id", noteId);
+    if (error) return { ok: false, error: error.message };
+    setProjectData((pd) => ({
+      ...pd,
+      [activeId]: { ...pd[activeId], notes: pd[activeId].notes.map((n) => (n.id === noteId ? { ...n, has_drawing: true } : n)) },
+    }));
+    return { ok: true };
+  }
+
+  async function loadDrawing(noteId) {
+    const path = `${userId}/${noteId}.png`;
+    const { data, error } = await supabase.storage.from("note-drawings").download(path);
+    if (error || !data) return null;
+    return URL.createObjectURL(data);
+  }
+
   useEffect(() => {
     window.addEventListener("beforeunload", flushAllNotes);
     return () => {
@@ -1758,7 +1951,16 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                       <div className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>
                         <FileText size={13} /> Notas
                       </div>
-                      <NotesPanel notes={data.notes} onAdd={addNote} onUpdate={updateNote} onDelete={deleteNote} onFlush={flushNote} color={active.color} />
+                      <NotesPanel
+                        notes={data.notes}
+                        onAdd={addNote}
+                        onUpdate={updateNote}
+                        onDelete={deleteNote}
+                        onFlush={flushNote}
+                        onSaveDrawing={saveDrawing}
+                        onLoadDrawing={loadDrawing}
+                        color={active.color}
+                      />
                     </div>
                     <div className="flex flex-col" style={{ minHeight: 320 }}>
                       <div className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>
