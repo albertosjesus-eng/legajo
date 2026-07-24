@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Plus, X, Trash2, ChevronLeft, FileText, CalendarDays,
   CheckSquare, Square, Loader2, FolderOpen, LogOut, Link2, CalendarCheck,
-  Sparkles, Send, Pencil
+  Sparkles, Send, Pencil, History, Archive, ArchiveRestore, Search, Download
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import Login from "./Login";
@@ -29,6 +29,57 @@ function todayISO() {
 }
 function emptyData() {
   return { notes: [], tasks: [], events: [] };
+}
+
+function downloadFile(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function slugify(name) {
+  return (
+    (name || "proyecto")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "proyecto"
+  );
+}
+
+function projectToMarkdown(project, data) {
+  const d = data || emptyData();
+  let md = `# ${project.name}\n\n`;
+
+  md += `## Tareas\n\n`;
+  if (d.tasks.length === 0) md += "_Sin tareas._\n\n";
+  d.tasks.forEach((t) => {
+    md += `- [${t.done ? "x" : " "}] ${t.text}${t.due_date ? ` (vence ${t.due_date})` : ""}\n`;
+  });
+
+  md += `\n## Agenda\n\n`;
+  if (d.events.length === 0) md += "_Sin citas._\n\n";
+  d.events
+    .slice()
+    .sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")))
+    .forEach((e) => {
+      md += `- ${e.date}${e.time ? " " + e.time : ""}: ${e.title}\n`;
+    });
+
+  md += `\n## Notas\n\n`;
+  if (d.notes.length === 0) md += "_Sin notas._\n\n";
+  d.notes.forEach((n) => {
+    md += `### ${n.title || "(sin título)"}\n\n${n.body || ""}\n\n`;
+  });
+
+  return md;
 }
 
 function timeAgo(iso) {
@@ -118,7 +169,7 @@ function ProjectHeader({ project, onUpdate }) {
       <h2 className="text-lg font-serif" style={{ color: TEXT_LIGHT }}>
         {project.name}
       </h2>
-      <button onClick={() => setEditing(true)} className="opacity-0 group-hover:opacity-100" style={{ color: TEXT_MUTED }}>
+      <button onClick={() => setEditing(true)} className="opacity-70 hover:opacity-100" style={{ color: TEXT_MUTED }}>
         <Pencil size={13} />
       </button>
     </div>
@@ -309,12 +360,12 @@ function TaskRow({ t, onToggle, onDelete, onUpdate, color, today, done }) {
       </div>
       <button
         onClick={() => setEditing(true)}
-        className="opacity-0 group-hover:opacity-100 shrink-0"
+        className="opacity-70 hover:opacity-100 shrink-0"
         style={{ color: TEXT_MUTED }}
       >
         <Pencil size={13} />
       </button>
-      <button onClick={() => onDelete(t.id)} className="opacity-0 group-hover:opacity-100 shrink-0" style={{ color: TEXT_MUTED }}>
+      <button onClick={() => onDelete(t.id)} className="opacity-70 hover:opacity-100 shrink-0" style={{ color: TEXT_MUTED }}>
         <X size={14} />
       </button>
     </div>
@@ -469,10 +520,10 @@ function EventRow({ ev, onDelete, onUpdate, color, today }) {
       <span className="text-sm flex-1" style={{ color: isPast ? TEXT_MUTED : TEXT_LIGHT }}>
         {ev.title}
       </span>
-      <button onClick={() => setEditing(true)} className="opacity-0 group-hover:opacity-100 shrink-0" style={{ color: TEXT_MUTED }}>
+      <button onClick={() => setEditing(true)} className="opacity-70 hover:opacity-100 shrink-0" style={{ color: TEXT_MUTED }}>
         <Pencil size={13} />
       </button>
-      <button onClick={() => onDelete(ev.id)} className="opacity-0 group-hover:opacity-100 shrink-0" style={{ color: TEXT_MUTED }}>
+      <button onClick={() => onDelete(ev.id)} className="opacity-70 hover:opacity-100 shrink-0" style={{ color: TEXT_MUTED }}>
         <X size={14} />
       </button>
     </div>
@@ -668,10 +719,317 @@ async function callEdgeFunction(name, body) {
   return { ok: res.ok, status: res.status, data };
 }
 
+function TimelineEntry({ entry, onOpen }) {
+  const Icon = entry.type === "task" ? CheckSquare : entry.type === "event" ? CalendarDays : FileText;
+  return (
+    <button
+      onClick={() => onOpen(entry.projectId)}
+      className="w-full text-left flex items-center gap-3 p-2.5 rounded-md"
+      style={{ background: SURFACE2 }}
+    >
+      <Icon size={15} style={{ color: entry.overdue ? "#e0836f" : entry.projectColor }} className="shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="text-sm truncate" style={{ color: TEXT_LIGHT }}>
+          {entry.label}
+        </div>
+        <div className="text-xs flex items-center gap-1.5 mt-0.5" style={{ color: entry.overdue ? "#e0836f" : TEXT_MUTED }}>
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: entry.projectColor }} />
+          <span className="truncate">{entry.projectName}</span>
+          {entry.sublabel && <span className="shrink-0">· {entry.sublabel}</span>}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function TimelineView({ projects, timelineData, loading, onOpen }) {
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 py-16 justify-center" style={{ color: TEXT_MUTED }}>
+        <Loader2 size={18} className="animate-spin" /> Cargando cronología...
+      </div>
+    );
+  }
+  if (!timelineData) return null;
+
+  const projectById = Object.fromEntries(projects.map((p) => [p.id, p]));
+  const today = todayISO();
+
+  const noDate = [];
+  const upcoming = [];
+  const recent = [];
+
+  timelineData.tasks.forEach((t) => {
+    if (t.done) return;
+    const p = projectById[t.project_id];
+    if (!p || p.archived) return;
+    const base = {
+      type: "task",
+      id: "task-" + t.id,
+      projectId: t.project_id,
+      projectName: p.name,
+      projectColor: p.color,
+      label: t.text,
+    };
+    if (!t.due_date) {
+      noDate.push(base);
+    } else if (t.due_date < today) {
+      upcoming.push({ ...base, dateKey: t.due_date, sublabel: "vencida · " + t.due_date, overdue: true });
+    } else {
+      upcoming.push({ ...base, dateKey: t.due_date, sublabel: "vence " + t.due_date });
+    }
+  });
+
+  timelineData.events.forEach((e) => {
+    const p = projectById[e.project_id];
+    if (!p || p.archived) return;
+    const entry = {
+      type: "event",
+      id: "event-" + e.id,
+      projectId: e.project_id,
+      projectName: p.name,
+      projectColor: p.color,
+      label: e.title,
+      dateKey: e.date + (e.time || "00:00"),
+      sublabel: e.date.slice(5).replace("-", "/") + (e.time ? " " + e.time : ""),
+    };
+    if (e.date >= today) upcoming.push(entry);
+    else recent.push(entry);
+  });
+
+  timelineData.notes.forEach((n) => {
+    const p = projectById[n.project_id];
+    if (!p || p.archived) return;
+    recent.push({
+      type: "note",
+      id: "note-" + n.id,
+      projectId: n.project_id,
+      projectName: p.name,
+      projectColor: p.color,
+      label: n.title || "(sin título)",
+      dateKey: n.updated_at,
+      sublabel: "editada " + timeAgo(n.updated_at),
+    });
+  });
+
+  upcoming.sort((a, b) => (a.dateKey || "").localeCompare(b.dateKey || ""));
+  recent.sort((a, b) => new Date(b.dateKey) - new Date(a.dateKey));
+
+  const isEmpty = noDate.length === 0 && upcoming.length === 0 && recent.length === 0;
+
+  return (
+    <div className="flex flex-col gap-6">
+      {isEmpty && (
+        <p className="text-sm text-center py-10" style={{ color: TEXT_MUTED }}>
+          Todavía no hay tareas, citas o notas en ningún proyecto.
+        </p>
+      )}
+      {noDate.length > 0 && (
+        <div>
+          <div className="text-xs uppercase tracking-wide mb-2" style={{ color: TEXT_MUTED }}>
+            Sin fecha
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {noDate.map((e) => (
+              <TimelineEntry key={e.id} entry={e} onOpen={onOpen} />
+            ))}
+          </div>
+        </div>
+      )}
+      {upcoming.length > 0 && (
+        <div>
+          <div className="text-xs uppercase tracking-wide mb-2" style={{ color: TEXT_MUTED }}>
+            Próximamente
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {upcoming.map((e) => (
+              <TimelineEntry key={e.id} entry={e} onOpen={onOpen} />
+            ))}
+          </div>
+        </div>
+      )}
+      {recent.length > 0 && (
+        <div>
+          <div className="text-xs uppercase tracking-wide mb-2" style={{ color: TEXT_MUTED }}>
+            Reciente
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {recent.map((e) => (
+              <TimelineEntry key={e.id} entry={e} onOpen={onOpen} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HomeSummary({ projects, timelineData, onOpenTimeline }) {
+  if (!timelineData) return null;
+  const projectById = Object.fromEntries(projects.filter((p) => !p.archived).map((p) => [p.id, p]));
+  const today = todayISO();
+  const in7days = new Date();
+  in7days.setDate(in7days.getDate() + 7);
+  const in7daysStr = in7days.toISOString().slice(0, 10);
+
+  let overdue = 0;
+  let dueSoon = 0;
+  timelineData.tasks.forEach((t) => {
+    if (t.done || !t.due_date || !projectById[t.project_id]) return;
+    if (t.due_date < today) overdue++;
+    else if (t.due_date <= in7daysStr) dueSoon++;
+  });
+
+  let eventsSoon = 0;
+  timelineData.events.forEach((e) => {
+    if (!projectById[e.project_id]) return;
+    if (e.date >= today && e.date <= in7daysStr) eventsSoon++;
+  });
+
+  if (overdue === 0 && dueSoon === 0 && eventsSoon === 0) {
+    return (
+      <div className="mb-4 px-4 py-3 rounded-lg text-sm" style={{ background: SURFACE2, color: TEXT_MUTED }}>
+        Todo al día — sin tareas ni citas en los próximos 7 días.
+      </div>
+    );
+  }
+
+  const parts = [];
+  if (overdue > 0) parts.push(`${overdue} tarea${overdue > 1 ? "s" : ""} vencida${overdue > 1 ? "s" : ""}`);
+  if (dueSoon > 0) parts.push(`${dueSoon} tarea${dueSoon > 1 ? "s" : ""} para esta semana`);
+  if (eventsSoon > 0) parts.push(`${eventsSoon} cita${eventsSoon > 1 ? "s" : ""} próxima${eventsSoon > 1 ? "s" : ""}`);
+
+  return (
+    <button
+      onClick={onOpenTimeline}
+      className="mb-4 px-4 py-3 rounded-lg text-sm text-left w-full"
+      style={{ background: overdue > 0 ? "#4a2b23" : SURFACE2, color: overdue > 0 ? "#f2d9d0" : TEXT_LIGHT }}
+    >
+      {parts.join(" · ")}
+    </button>
+  );
+}
+
+function SearchView({ projects, timelineData, loading, onOpen }) {
+  const [query, setQuery] = useState("");
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 py-16 justify-center" style={{ color: TEXT_MUTED }}>
+        <Loader2 size={18} className="animate-spin" /> Cargando...
+      </div>
+    );
+  }
+
+  const projectById = Object.fromEntries(projects.map((p) => [p.id, p]));
+  const q = query.trim().toLowerCase();
+
+  let taskMatches = [];
+  let eventMatches = [];
+  let noteMatches = [];
+
+  if (q && timelineData) {
+    taskMatches = timelineData.tasks
+      .filter((t) => !t.done && t.text.toLowerCase().includes(q))
+      .map((t) => {
+        const p = projectById[t.project_id];
+        return p && !p.archived
+          ? { id: "task-" + t.id, projectId: t.project_id, projectName: p.name, projectColor: p.color, label: t.text, sublabel: t.due_date ? "vence " + t.due_date : null }
+          : null;
+      })
+      .filter(Boolean);
+
+    eventMatches = timelineData.events
+      .filter((e) => e.title.toLowerCase().includes(q))
+      .map((e) => {
+        const p = projectById[e.project_id];
+        return p && !p.archived
+          ? { id: "event-" + e.id, projectId: e.project_id, projectName: p.name, projectColor: p.color, label: e.title, sublabel: e.date }
+          : null;
+      })
+      .filter(Boolean);
+
+    noteMatches = timelineData.notes
+      .filter((n) => (n.title || "").toLowerCase().includes(q) || (n.body || "").toLowerCase().includes(q))
+      .map((n) => {
+        const p = projectById[n.project_id];
+        return p && !p.archived
+          ? { id: "note-" + n.id, projectId: n.project_id, projectName: p.name, projectColor: p.color, label: n.title || "(sin título)", sublabel: "editada " + timeAgo(n.updated_at) }
+          : null;
+      })
+      .filter(Boolean);
+  }
+
+  const totalMatches = taskMatches.length + eventMatches.length + noteMatches.length;
+
+  return (
+    <div>
+      <input
+        autoFocus
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Buscar en notas, tareas y citas de todos los proyectos..."
+        className="w-full px-4 py-3 rounded-lg text-sm outline-none mb-6"
+        style={{ background: SURFACE2, color: TEXT_LIGHT }}
+      />
+      {!q && (
+        <p className="text-sm text-center py-10" style={{ color: TEXT_MUTED }}>
+          Escribe algo para buscar en todos tus proyectos a la vez.
+        </p>
+      )}
+      {q && totalMatches === 0 && (
+        <p className="text-sm text-center py-10" style={{ color: TEXT_MUTED }}>
+          Sin resultados para "{query}".
+        </p>
+      )}
+      {q && noteMatches.length > 0 && (
+        <div className="mb-5">
+          <div className="text-xs uppercase tracking-wide mb-2" style={{ color: TEXT_MUTED }}>
+            Notas
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {noteMatches.map((e) => (
+              <TimelineEntry key={e.id} entry={{ ...e, type: "note" }} onOpen={onOpen} />
+            ))}
+          </div>
+        </div>
+      )}
+      {q && taskMatches.length > 0 && (
+        <div className="mb-5">
+          <div className="text-xs uppercase tracking-wide mb-2" style={{ color: TEXT_MUTED }}>
+            Tareas
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {taskMatches.map((e) => (
+              <TimelineEntry key={e.id} entry={{ ...e, type: "task" }} onOpen={onOpen} />
+            ))}
+          </div>
+        </div>
+      )}
+      {q && eventMatches.length > 0 && (
+        <div>
+          <div className="text-xs uppercase tracking-wide mb-2" style={{ color: TEXT_MUTED }}>
+            Agenda
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {eventMatches.map((e) => (
+              <TimelineEntry key={e.id} entry={{ ...e, type: "event" }} onOpen={onOpen} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LegajoApp({ userId, userEmail, onLogout }) {
   const [projects, setProjects] = useState([]);
   const [activeId, setActiveId] = useState(null);
-  const [view, setView] = useState("home"); // "home" | "project"
+  const [view, setView] = useState("home"); // "home" | "project" | "timeline"
+  const [timelineData, setTimelineData] = useState(null);
+  const [loadingTimeline, setLoadingTimeline] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [projectData, setProjectData] = useState({});
   const [loadingIndex, setLoadingIndex] = useState(true);
   const [loadingProject, setLoadingProject] = useState(false);
@@ -691,6 +1049,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   useEffect(() => {
     loadProjects();
     checkCalendarStatus();
+    loadTimeline();
 
     // Si venimos de vuelta de Google, mostramos aviso y limpiamos la URL
     const params = new URLSearchParams(window.location.search);
@@ -791,13 +1150,20 @@ function LegajoApp({ userId, userEmail, onLogout }) {
       setProjectData((pd) => ({ ...pd, [data.id]: emptyData() }));
       setActiveId(data.id);
       setView("project");
+    } else {
+      setSaveError("No se pudo crear el proyecto: " + (error?.message || "error desconocido"));
     }
     setNewName("");
     setShowNewProject(false);
   }
 
   async function deleteProject(id) {
-    await supabase.from("projects").delete().eq("id", id);
+    const { error } = await supabase.from("projects").delete().eq("id", id);
+    if (error) {
+      setSaveError("No se pudo eliminar el proyecto: " + (error.message || "error desconocido"));
+      setConfirmDelete(false);
+      return;
+    }
     const remaining = projects.filter((p) => p.id !== id);
     setProjects(remaining);
     setProjectData((pd) => {
@@ -823,6 +1189,64 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   function openProject(id) {
     setActiveId(id);
     setView("project");
+  }
+
+  async function loadTimeline() {
+    setLoadingTimeline(true);
+    const [tasksRes, eventsRes, notesRes] = await Promise.all([
+      supabase.from("tasks").select("id,project_id,text,done,due_date"),
+      supabase.from("events").select("id,project_id,title,date,time"),
+      supabase.from("notes").select("id,project_id,title,body,updated_at"),
+    ]);
+    setTimelineData({
+      tasks: tasksRes.data || [],
+      events: eventsRes.data || [],
+      notes: notesRes.data || [],
+    });
+    setLoadingTimeline(false);
+  }
+
+  function openFromTimeline(id) {
+    setActiveId(id);
+    setView("project");
+  }
+
+  async function exportAll() {
+    setExporting(true);
+    try {
+      const [notesRes, tasksRes, eventsRes] = await Promise.all([
+        supabase.from("notes").select("project_id,title,body,updated_at"),
+        supabase.from("tasks").select("project_id,text,done,due_date"),
+        supabase.from("events").select("project_id,title,date,time"),
+      ]);
+      const notesAll = notesRes.data || [];
+      const tasksAll = tasksRes.data || [];
+      const eventsAll = eventsRes.data || [];
+
+      const exportObj = {
+        exported_at: new Date().toISOString(),
+        projects: projects.map((p) => ({
+          name: p.name,
+          color: p.color,
+          archived: !!p.archived,
+          created_at: p.created_at,
+          notes: notesAll.filter((n) => n.project_id === p.id),
+          tasks: tasksAll.filter((t) => t.project_id === p.id),
+          events: eventsAll.filter((e) => e.project_id === p.id),
+        })),
+      };
+
+      downloadFile(JSON.stringify(exportObj, null, 2), `legajo-export-${todayISO()}.json`, "application/json");
+    } catch (e) {
+      setSaveError("No se pudo exportar: " + String(e));
+    }
+    setExporting(false);
+  }
+
+  function exportActiveProject() {
+    if (!active) return;
+    const md = projectToMarkdown(active, data);
+    downloadFile(md, `${slugify(active.name)}.md`, "text/markdown");
   }
 
   const active = projects.find((p) => p.id === activeId);
@@ -881,7 +1305,11 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   async function deleteNote(id) {
     clearTimeout(noteTimers.current[id]);
     delete notePending.current[id];
-    await supabase.from("notes").delete().eq("id", id);
+    const { error } = await supabase.from("notes").delete().eq("id", id);
+    if (error) {
+      setSaveError("No se pudo eliminar la nota: " + (error.message || "error desconocido"));
+      return;
+    }
     setProjectData((pd) => ({ ...pd, [activeId]: { ...pd[activeId], notes: pd[activeId].notes.filter((n) => n.id !== id) } }));
   }
 
@@ -905,11 +1333,23 @@ function LegajoApp({ userId, userEmail, onLogout }) {
       ...pd,
       [activeId]: { ...pd[activeId], tasks: pd[activeId].tasks.map((t) => (t.id === task.id ? { ...t, done } : t)) },
     }));
-    await supabase.from("tasks").update({ done }).eq("id", task.id);
+    const { error } = await supabase.from("tasks").update({ done }).eq("id", task.id);
+    if (error) {
+      setSaveError("No se pudo actualizar la tarea: " + (error.message || "error desconocido"));
+      // revertimos el cambio optimista si de verdad no se ha guardado
+      setProjectData((pd) => ({
+        ...pd,
+        [activeId]: { ...pd[activeId], tasks: pd[activeId].tasks.map((t) => (t.id === task.id ? { ...t, done: !done } : t)) },
+      }));
+    }
   }
 
   async function deleteTask(id) {
-    await supabase.from("tasks").delete().eq("id", id);
+    const { error } = await supabase.from("tasks").delete().eq("id", id);
+    if (error) {
+      setSaveError("No se pudo eliminar la tarea: " + (error.message || "error desconocido"));
+      return;
+    }
     setProjectData((pd) => ({ ...pd, [activeId]: { ...pd[activeId], tasks: pd[activeId].tasks.filter((t) => t.id !== id) } }));
   }
 
@@ -965,7 +1405,11 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     const currentEvents = projectData[activeId]?.events || [];
     const ev = currentEvents.find((e) => e.id === id);
 
-    await supabase.from("events").delete().eq("id", id);
+    const { error } = await supabase.from("events").delete().eq("id", id);
+    if (error) {
+      setSaveError("No se pudo eliminar la cita: " + (error.message || "error desconocido"));
+      return;
+    }
     setProjectData((pd) => ({ ...pd, [activeId]: { ...pd[activeId], events: pd[activeId].events.filter((e) => e.id !== id) } }));
 
     if (googleConnected && ev?.google_event_id) {
@@ -1035,6 +1479,36 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                 Conectar Google Calendar
               </button>
             )}
+            <button
+              onClick={exportAll}
+              disabled={exporting}
+              title="Descargar todos tus proyectos en un archivo"
+              className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md"
+              style={{ background: SURFACE2, color: TEXT_LIGHT, opacity: exporting ? 0.7 : 1 }}
+            >
+              {exporting ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+              Exportar
+            </button>
+            <button
+              onClick={() => {
+                setView("search");
+                if (!timelineData) loadTimeline();
+              }}
+              className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md"
+              style={{ background: SURFACE2, color: TEXT_LIGHT }}
+            >
+              <Search size={15} /> Buscar
+            </button>
+            <button
+              onClick={() => {
+                setView("timeline");
+                loadTimeline();
+              }}
+              className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md"
+              style={{ background: SURFACE2, color: TEXT_LIGHT }}
+            >
+              <History size={15} /> Ver cronología
+            </button>
             <button
               onClick={() => setShowNewProject((s) => !s)}
               className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-md"
@@ -1131,12 +1605,76 @@ function LegajoApp({ userId, userEmail, onLogout }) {
             </p>
           </div>
         ) : view === "home" ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {[...projects]
-              .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at))
-              .map((p) => (
-                <ProjectCard key={p.id} project={p} onOpen={openProject} />
-              ))}
+          <div>
+            <HomeSummary
+              projects={projects}
+              timelineData={timelineData}
+              onOpenTimeline={() => {
+                setView("timeline");
+                loadTimeline();
+              }}
+            />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {[...projects]
+                .filter((p) => !p.archived)
+                .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at))
+                .map((p) => (
+                  <ProjectCard key={p.id} project={p} onOpen={openProject} />
+                ))}
+            </div>
+            {projects.some((p) => p.archived) && (
+              <div className="mt-6">
+                {!showArchived ? (
+                  <button
+                    onClick={() => setShowArchived(true)}
+                    className="text-xs flex items-center gap-1.5"
+                    style={{ color: TEXT_MUTED }}
+                  >
+                    <Archive size={13} /> Ver proyectos archivados ({projects.filter((p) => p.archived).length})
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => setShowArchived(false)}
+                      className="text-xs flex items-center gap-1.5 mb-3"
+                      style={{ color: TEXT_MUTED }}
+                    >
+                      <Archive size={13} /> Ocultar archivados
+                    </button>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 opacity-70">
+                      {[...projects]
+                        .filter((p) => p.archived)
+                        .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at))
+                        .map((p) => (
+                          <ProjectCard key={p.id} project={p} onOpen={openProject} />
+                        ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        ) : view === "timeline" ? (
+          <div>
+            <button
+              onClick={() => setView("home")}
+              className="flex items-center gap-1 text-xs mb-4"
+              style={{ color: TEXT_MUTED }}
+            >
+              <ChevronLeft size={14} /> Inicio
+            </button>
+            <TimelineView projects={projects} timelineData={timelineData} loading={loadingTimeline} onOpen={openFromTimeline} />
+          </div>
+        ) : view === "search" ? (
+          <div>
+            <button
+              onClick={() => setView("home")}
+              className="flex items-center gap-1 text-xs mb-4"
+              style={{ color: TEXT_MUTED }}
+            >
+              <ChevronLeft size={14} /> Inicio
+            </button>
+            <SearchView projects={projects} timelineData={timelineData} loading={loadingTimeline} onOpen={openFromTimeline} />
           </div>
         ) : (
           active && (
@@ -1156,21 +1694,46 @@ function LegajoApp({ userId, userEmail, onLogout }) {
               <div className="rounded-xl p-4 md:p-6" style={{ background: SURFACE }}>
                 <div className="flex items-start justify-between">
                   <ProjectHeader project={active} onUpdate={updateProject} />
-                  {!confirmDelete ? (
-                    <button onClick={() => setConfirmDelete(true)} className="text-xs flex items-center gap-1" style={{ color: TEXT_MUTED }}>
-                      <Trash2 size={13} /> Eliminar proyecto
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={exportActiveProject}
+                      title="Descargar este proyecto en Markdown"
+                      className="text-xs flex items-center gap-1"
+                      style={{ color: TEXT_MUTED }}
+                    >
+                      <Download size={13} /> Exportar
                     </button>
-                  ) : (
-                    <div className="flex items-center gap-2 text-xs">
-                      <span style={{ color: TEXT_MUTED }}>¿Eliminar proyecto y todos sus datos?</span>
-                      <button onClick={() => deleteProject(active.id)} className="px-2 py-1 rounded" style={{ background: "#8a3b2a", color: "#fff" }}>
-                        Eliminar
+                    <button
+                      onClick={() => updateProject(active.id, { archived: !active.archived })}
+                      className="text-xs flex items-center gap-1"
+                      style={{ color: TEXT_MUTED }}
+                    >
+                      {active.archived ? (
+                        <>
+                          <ArchiveRestore size={13} /> Desarchivar
+                        </>
+                      ) : (
+                        <>
+                          <Archive size={13} /> Archivar
+                        </>
+                      )}
+                    </button>
+                    {!confirmDelete ? (
+                      <button onClick={() => setConfirmDelete(true)} className="text-xs flex items-center gap-1" style={{ color: TEXT_MUTED }}>
+                        <Trash2 size={13} /> Eliminar proyecto
                       </button>
-                      <button onClick={() => setConfirmDelete(false)} style={{ color: TEXT_MUTED }}>
-                        Cancelar
-                      </button>
-                    </div>
-                  )}
+                    ) : (
+                      <div className="flex items-center gap-2 text-xs">
+                        <span style={{ color: TEXT_MUTED }}>¿Eliminar proyecto y todos sus datos?</span>
+                        <button onClick={() => deleteProject(active.id)} className="px-2 py-1 rounded" style={{ background: "#8a3b2a", color: "#fff" }}>
+                          Eliminar
+                        </button>
+                        <button onClick={() => setConfirmDelete(false)} style={{ color: TEXT_MUTED }}>
+                          Cancelar
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {loadingProject ? (
