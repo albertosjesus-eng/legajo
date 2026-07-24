@@ -164,12 +164,12 @@ function ProjectHeader({ project, onUpdate }) {
   }
 
   return (
-    <div className="flex items-center gap-2 mb-4 group">
-      <span className="w-2.5 h-2.5 rounded-full" style={{ background: project.color }} />
-      <h2 className="text-lg font-serif" style={{ color: TEXT_LIGHT }}>
+    <div className="flex items-center gap-2 mb-4 group min-w-0">
+      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: project.color }} />
+      <h2 className="text-lg font-serif truncate" style={{ color: TEXT_LIGHT }}>
         {project.name}
       </h2>
-      <button onClick={() => setEditing(true)} className="opacity-70 hover:opacity-100" style={{ color: TEXT_MUTED }}>
+      <button onClick={() => setEditing(true)} className="opacity-70 hover:opacity-100 shrink-0" style={{ color: TEXT_MUTED }}>
         <Pencil size={13} />
       </button>
     </div>
@@ -1978,42 +1978,32 @@ function LegajoApp({ userId, userEmail, onLogout }) {
               <div className="rounded-xl p-4 md:p-6" style={{ background: SURFACE }}>
                 <div className="flex items-start justify-between">
                   <ProjectHeader project={active} onUpdate={updateProject} />
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 shrink-0">
                     <button
                       onClick={exportActiveProject}
-                      title="Descargar este proyecto en Markdown"
-                      className="text-xs flex items-center gap-1"
+                      title="Exportar este proyecto en Markdown"
                       style={{ color: TEXT_MUTED }}
                     >
-                      <Download size={13} /> Exportar
+                      <Download size={15} />
                     </button>
                     <button
                       onClick={() => updateProject(active.id, { archived: !active.archived })}
-                      className="text-xs flex items-center gap-1"
+                      title={active.archived ? "Desarchivar proyecto" : "Archivar proyecto"}
                       style={{ color: TEXT_MUTED }}
                     >
-                      {active.archived ? (
-                        <>
-                          <ArchiveRestore size={13} /> Desarchivar
-                        </>
-                      ) : (
-                        <>
-                          <Archive size={13} /> Archivar
-                        </>
-                      )}
+                      {active.archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}
                     </button>
                     {!confirmDelete ? (
-                      <button onClick={() => setConfirmDelete(true)} className="text-xs flex items-center gap-1" style={{ color: TEXT_MUTED }}>
-                        <Trash2 size={13} /> Eliminar proyecto
+                      <button onClick={() => setConfirmDelete(true)} title="Eliminar proyecto" style={{ color: TEXT_MUTED }}>
+                        <Trash2 size={15} />
                       </button>
                     ) : (
-                      <div className="flex items-center gap-2 text-xs">
-                        <span style={{ color: TEXT_MUTED }}>¿Eliminar proyecto y todos sus datos?</span>
+                      <div className="flex items-center gap-1.5 text-xs">
                         <button onClick={() => deleteProject(active.id)} className="px-2 py-1 rounded" style={{ background: "#8a3b2a", color: "#fff" }}>
-                          Eliminar
+                          Confirmar
                         </button>
                         <button onClick={() => setConfirmDelete(false)} style={{ color: TEXT_MUTED }}>
-                          Cancelar
+                          <X size={15} />
                         </button>
                       </div>
                     )}
