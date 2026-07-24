@@ -565,18 +565,18 @@ function TasksPanel({ tasks, onAdd, onToggle, onDelete, onUpdate, color }) {
               if (e.key === "Enter") submit();
             }}
             placeholder="Añadir tarea..."
-            className="flex-1 px-3 py-2 rounded-md text-sm outline-none"
+            className="flex-1 min-w-0 px-3 py-2 rounded-md text-sm outline-none"
             style={{ background: PAPER, color: INK_ON_PAPER }}
           />
           <button
             onClick={() => setShowDate((s) => !s)}
             title="Poner fecha límite"
-            className="px-2.5 rounded-md"
+            className="px-2.5 rounded-md shrink-0"
             style={{ background: showDate || dueDate ? color : SURFACE2, color: showDate || dueDate ? "#fff" : TEXT_MUTED }}
           >
             <CalendarDays size={15} />
           </button>
-          <button onClick={submit} className="px-3 rounded-md" style={{ background: color, color: "#fff" }}>
+          <button onClick={submit} className="px-3 rounded-md shrink-0" style={{ background: color, color: "#fff" }}>
             <Plus size={16} />
           </button>
         </div>
