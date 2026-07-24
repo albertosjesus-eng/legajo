@@ -208,7 +208,7 @@ function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, onSaveDrawing, 
     ctx.scale(dpr, dpr);
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.strokeStyle = INK_ON_PAPER;
+    ctx.strokeStyle = "#ffffff";
     ctxRef.current = ctx;
     hasStrokesRef.current = false;
 
@@ -317,7 +317,7 @@ function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, onSaveDrawing, 
       <div className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-10" style={{ background: "rgba(0,0,0,0.6)" }}>
         <div
           className="w-full max-w-3xl rounded-xl p-4 md:p-6 flex flex-col"
-          style={{ background: PAPER, maxHeight: "92vh", height: "92vh" }}
+          style={{ background: "#000000", maxHeight: "92vh", height: "92vh" }}
         >
           <div className="flex items-center justify-between mb-2">
             <button
@@ -327,20 +327,20 @@ function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, onSaveDrawing, 
                 setSaveState("idle");
               }}
               className="flex items-center gap-1 text-xs self-start"
-              style={{ color: "#6b6252" }}
+              style={{ color: TEXT_MUTED }}
             >
               <ChevronLeft size={14} /> Volver a notas
             </button>
             <div className="flex items-center gap-2">
               {drawMode && (
-                <button onClick={clearDrawing} className="text-xs px-2.5 py-1.5 rounded-md" style={{ color: "#8a3b2a" }}>
+                <button onClick={clearDrawing} className="text-xs px-2.5 py-1.5 rounded-md" style={{ color: "#e0836f" }}>
                   Borrar dibujo
                 </button>
               )}
               <button
                 onClick={() => setDrawMode((d) => !d)}
                 className="text-xs flex items-center gap-1.5 px-2.5 py-1.5 rounded-md"
-                style={{ background: drawMode ? color : "rgba(0,0,0,0.06)", color: drawMode ? "#fff" : "#6b6252" }}
+                style={{ background: drawMode ? color : "rgba(255,255,255,0.1)", color: drawMode ? "#fff" : TEXT_MUTED }}
               >
                 <PenTool size={13} /> {drawMode ? "Dibujando" : "Dibujar"}
               </button>
@@ -352,13 +352,13 @@ function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, onSaveDrawing, 
               onChange={(e) => onUpdate(openId, { title: e.target.value })}
               placeholder="Título de la nota"
               className="flex-1 bg-transparent border-none outline-none text-xl font-serif"
-              style={{ color: INK_ON_PAPER }}
+              style={{ color: "#ffffff" }}
             />
             <button
               onClick={insertTimestamp}
               title="Insertar fecha y hora en el texto"
               className="p-1.5 rounded-md shrink-0"
-              style={{ color: "#6b6252" }}
+              style={{ color: TEXT_MUTED }}
             >
               <Clock size={16} />
             </button>
@@ -372,7 +372,7 @@ function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, onSaveDrawing, 
               onChange={(e) => onUpdate(openId, { body: e.target.value })}
               placeholder="Escribe aquí..."
               className="absolute inset-0 bg-transparent border-none outline-none resize-none text-base leading-relaxed"
-              style={{ color: INK_ON_PAPER }}
+              style={{ color: "#ffffff" }}
             />
             <canvas
               ref={canvasRef}
@@ -385,18 +385,18 @@ function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, onSaveDrawing, 
             />
           </div>
           {saveState === "error" && (
-            <div className="text-xs mb-2 px-2 py-1.5 rounded" style={{ background: "#f3d9d0", color: "#8a3b2a" }}>
+            <div className="text-xs mb-2 px-2 py-1.5 rounded" style={{ background: "#4a2b23", color: "#f2d9d0" }}>
               No se pudo guardar: {saveMsg}
             </div>
           )}
-          <div className="flex justify-between items-center mt-3 pt-3" style={{ borderTop: "1px solid rgba(0,0,0,0.08)" }}>
+          <div className="flex justify-between items-center mt-3 pt-3" style={{ borderTop: "1px solid rgba(255,255,255,0.12)" }}>
             <button
               onClick={() => {
                 onDelete(openId);
                 setOpenId(null);
               }}
               className="text-xs flex items-center gap-1"
-              style={{ color: "#8a3b2a" }}
+              style={{ color: "#e0836f" }}
             >
               <Trash2 size={12} /> Eliminar nota
             </button>
@@ -422,10 +422,11 @@ function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, onSaveDrawing, 
           const id = await onAdd();
           if (id) setOpenId(id);
         }}
-        className="flex items-center gap-2 text-sm mb-3 px-3 py-2 rounded-md self-start"
+        title="Nueva nota"
+        className="flex items-center justify-center w-8 h-8 rounded-md mb-3 self-start"
         style={{ background: color, color: "#fff" }}
       >
-        <Plus size={15} /> Nueva nota
+        <Plus size={16} />
       </button>
       <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
         {notes.length === 0 && (
@@ -715,10 +716,11 @@ function AgendaPanel({ events, onAdd, onDelete, onUpdate, color }) {
       {!showForm ? (
         <button
           onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 text-sm mb-3 px-3 py-2 rounded-md self-start"
+          title="Nueva cita"
+          className="flex items-center justify-center w-8 h-8 rounded-md mb-3 self-start"
           style={{ background: color, color: "#fff" }}
         >
-          <Plus size={15} /> Nueva cita
+          <Plus size={16} />
         </button>
       ) : (
         <div className="mb-3 p-3 rounded-md flex flex-col gap-2" style={{ background: PAPER }}>
