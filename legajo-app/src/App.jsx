@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import {
-  Plus, X, Trash2, ChevronLeft, FileText, CalendarDays,
+  Plus, X, Trash2, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, FileText, CalendarDays,
   CheckSquare, Square, Loader2, FolderOpen, LogOut, Link2, CalendarCheck,
-  Sparkles, Send, Pencil, History, Archive, ArchiveRestore, Search, Download, PenTool, Clock, Menu
+  Sparkles, Send, Pencil, History, Archive, ArchiveRestore, Search, Download, PenTool, Clock, Menu, MoveHorizontal
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import Login from "./Login";
@@ -1188,6 +1188,50 @@ function SearchView({ projects, timelineData, loading, onOpen }) {
   );
 }
 
+const WIDTH_LABEL = { compact: "estrecho", normal: "normal", wide: "ancho" };
+
+function ProjectColumn({ icon: Icon, label, state, onCycleWidth, onToggleCollapse, children }) {
+  if (state.collapsed) {
+    return (
+      <button
+        onClick={onToggleCollapse}
+        className="flex items-center gap-2 rounded-md px-3 py-2.5 lg:flex-col lg:justify-start lg:px-1.5 lg:pt-3 lg:pb-2 lg:gap-2"
+        style={{ background: SURFACE2, color: TEXT_MUTED }}
+        title={`Expandir ${label}`}
+      >
+        <Icon size={15} className="shrink-0" />
+        <span className="text-xs lg:hidden">{label}</span>
+        <ChevronDown size={14} className="ml-auto lg:hidden" />
+        <ChevronRight size={14} className="hidden lg:block" />
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-col" style={{ minHeight: 320 }}>
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>
+          <Icon size={13} /> {label}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onCycleWidth}
+            title={`Ancho: ${WIDTH_LABEL[state.width]} (tocar para cambiar)`}
+            className="hidden lg:block"
+            style={{ color: TEXT_MUTED }}
+          >
+            <MoveHorizontal size={13} />
+          </button>
+          <button onClick={onToggleCollapse} title={`Colapsar ${label}`} style={{ color: TEXT_MUTED }}>
+            <ChevronUp size={13} />
+          </button>
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 function LegajoApp({ userId, userEmail, onLogout }) {
   const [projects, setProjects] = useState([]);
   const [activeId, setActiveId] = useState(null);
@@ -1197,6 +1241,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   const [showArchived, setShowArchived] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [columnLayout, setColumnLayout] = useState({});
   const [projectData, setProjectData] = useState({});
   const [loadingIndex, setLoadingIndex] = useState(true);
   const [loadingProject, setLoadingProject] = useState(false);
@@ -1371,6 +1416,36 @@ function LegajoApp({ userId, userEmail, onLogout }) {
       notes: notesRes.data || [],
     });
     setLoadingTimeline(false);
+  }
+
+  function getColumnState(projectId, key) {
+    return columnLayout[projectId]?.[key] || { width: "normal", collapsed: false };
+  }
+
+  function setColumnState(projectId, key, patch) {
+    setColumnLayout((prev) => ({
+      ...prev,
+      [projectId]: {
+        ...prev[projectId],
+        [key]: { ...(prev[projectId]?.[key] || { width: "normal", collapsed: false }), ...patch },
+      },
+    }));
+  }
+
+  function cycleColumnWidth(projectId, key) {
+    const current = getColumnState(projectId, key).width;
+    const next = current === "compact" ? "normal" : current === "normal" ? "wide" : "compact";
+    setColumnState(projectId, key, { width: next });
+  }
+
+  function toggleColumnCollapse(projectId, key) {
+    setColumnState(projectId, key, { collapsed: !getColumnState(projectId, key).collapsed });
+  }
+
+  function trackForColumn(state) {
+    if (state.collapsed) return "52px";
+    const FR = { compact: "0.7fr", normal: "1fr", wide: "1.6fr" };
+    return FR[state.width] || "1fr";
   }
 
   function openFromTimeline(id) {
@@ -2015,23 +2090,40 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                     <Loader2 size={16} className="animate-spin" /> Cargando proyecto...
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-                    <div className="flex flex-col" style={{ minHeight: 320 }}>
-                      <div className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>
-                        <CheckSquare size={13} /> Tareas
-                      </div>
+                  <div
+                    className="legajo-grid"
+                    style={{
+                      "--w-tareas": trackForColumn(getColumnState(active.id, "tareas")),
+                      "--w-agenda": trackForColumn(getColumnState(active.id, "agenda")),
+                      "--w-notas": trackForColumn(getColumnState(active.id, "notas")),
+                      "--w-claude": trackForColumn(getColumnState(active.id, "claude")),
+                    }}
+                  >
+                    <ProjectColumn
+                      icon={CheckSquare}
+                      label="Tareas"
+                      state={getColumnState(active.id, "tareas")}
+                      onCycleWidth={() => cycleColumnWidth(active.id, "tareas")}
+                      onToggleCollapse={() => toggleColumnCollapse(active.id, "tareas")}
+                    >
                       <TasksPanel tasks={data.tasks} onAdd={addTask} onToggle={toggleTask} onDelete={deleteTask} onUpdate={updateTask} color={active.color} />
-                    </div>
-                    <div className="flex flex-col" style={{ minHeight: 320 }}>
-                      <div className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>
-                        <CalendarDays size={13} /> Agenda
-                      </div>
+                    </ProjectColumn>
+                    <ProjectColumn
+                      icon={CalendarDays}
+                      label="Agenda"
+                      state={getColumnState(active.id, "agenda")}
+                      onCycleWidth={() => cycleColumnWidth(active.id, "agenda")}
+                      onToggleCollapse={() => toggleColumnCollapse(active.id, "agenda")}
+                    >
                       <AgendaPanel events={data.events} onAdd={addEvent} onDelete={deleteEvent} onUpdate={updateEvent} color={active.color} />
-                    </div>
-                    <div className="flex flex-col" style={{ minHeight: 320 }}>
-                      <div className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>
-                        <FileText size={13} /> Notas
-                      </div>
+                    </ProjectColumn>
+                    <ProjectColumn
+                      icon={FileText}
+                      label="Notas"
+                      state={getColumnState(active.id, "notas")}
+                      onCycleWidth={() => cycleColumnWidth(active.id, "notas")}
+                      onToggleCollapse={() => toggleColumnCollapse(active.id, "notas")}
+                    >
                       <NotesPanel
                         notes={data.notes}
                         onAdd={addNote}
@@ -2042,13 +2134,16 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                         onLoadDrawing={loadDrawing}
                         color={active.color}
                       />
-                    </div>
-                    <div className="flex flex-col" style={{ minHeight: 320 }}>
-                      <div className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>
-                        <Sparkles size={13} /> Preguntar a Claude
-                      </div>
+                    </ProjectColumn>
+                    <ProjectColumn
+                      icon={Sparkles}
+                      label="Preguntar a Claude"
+                      state={getColumnState(active.id, "claude")}
+                      onCycleWidth={() => cycleColumnWidth(active.id, "claude")}
+                      onToggleCollapse={() => toggleColumnCollapse(active.id, "claude")}
+                    >
                       <AskClaudePanel projectId={active.id} color={active.color} onCreated={() => loadProjectData(active.id)} />
-                    </div>
+                    </ProjectColumn>
                   </div>
                 )}
               </div>
