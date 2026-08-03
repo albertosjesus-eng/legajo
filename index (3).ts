@@ -1,222 +1,111 @@
-// supabase/functions/ask-claude/index.ts
+// supabase/functions/sync-calendar-event/index.ts
 //
-// Recibe { project_id, question } desde el frontend (ya autenticado).
-// Reúne notas + tareas + agenda de ese proyecto y se lo pasa como contexto
-// a Claude junto con la pregunta. Modo mixto: si el usuario solo pregunta o
-// pide opinión, Claude responde en texto sin tocar nada. Si pide
-// explícitamente crear tareas o citas, Claude puede usar las herramientas
-// create_task / create_event para crearlas de verdad en Legajo.
+// Llamada desde el frontend ya autenticado. Crea o borra un evento en el
+// calendario "Legajo" del usuario en Google Calendar, renovando el token
+// de acceso automáticamente si hace falta.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "jsr:@supabase/server@^1";
 
-const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
-const MAX_TOOL_ITERATIONS = 8;
+const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID")!;
+const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET")!;
 
-type NoteRow = { title: string | null; body: string | null };
-type TaskRow = { text: string; done: boolean; due_date: string | null };
-type EventRow = { title: string; date: string; time: string | null };
-
-const tools = [
-  {
-    name: "create_task",
-    description:
-      "Crea una tarea nueva en este proyecto de Legajo. Úsala solo cuando el usuario pida explícitamente crear tareas.",
-    input_schema: {
-      type: "object",
-      properties: {
-        text: { type: "string", description: "Texto de la tarea" },
-        due_date: { type: "string", description: "Fecha límite en formato YYYY-MM-DD (opcional)" },
-      },
-      required: ["text"],
-    },
-  },
-  {
-    name: "create_event",
-    description:
-      "Crea una cita en la agenda de este proyecto de Legajo. Úsala solo cuando el usuario pida explícitamente crear citas.",
-    input_schema: {
-      type: "object",
-      properties: {
-        title: { type: "string", description: "Título de la cita" },
-        date: { type: "string", description: "Fecha en formato YYYY-MM-DD" },
-        time: { type: "string", description: "Hora en formato HH:MM (opcional)" },
-      },
-      required: ["title", "date"],
-    },
-  },
-];
-
-function isValidISODate(value: unknown): value is string {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
-}
-
-async function runTool(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
-  projectId: string,
-  userId: string,
-  name: string,
-  input: Record<string, string>
-) {
-  if (name === "create_task") {
-    const dueDate = isValidISODate(input.due_date) ? input.due_date : null;
-    const dateWasDropped = !!input.due_date && !dueDate;
-    const { data, error } = await supabase
-      .from("tasks")
-      .insert({ project_id: projectId, user_id: userId, text: input.text, due_date: dueDate })
-      .select()
-      .single();
-    if (error) return { ok: false, error: error.message };
+function buildGoogleEventBody(event: { title: string; date: string; time?: string | null }) {
+  if (event.time) {
+    const start = `${event.date}T${event.time}:00`;
+    const d = new Date(start);
+    d.setMinutes(d.getMinutes() + 60);
+    const end = d.toISOString().slice(0, 19);
     return {
-      ok: true,
-      created: { type: "task", ...data },
-      note: dateWasDropped
-        ? "La fecha indicada no tenía un formato reconocible (se esperaba YYYY-MM-DD); la tarea se creó sin fecha límite."
-        : undefined,
+      summary: event.title,
+      start: { dateTime: start },
+      end: { dateTime: end },
     };
   }
-  if (name === "create_event") {
-    if (!isValidISODate(input.date)) {
-      return { ok: false, error: "La fecha de la cita no tiene un formato reconocible (se esperaba YYYY-MM-DD)." };
-    }
-    const { data, error } = await supabase
-      .from("events")
-      .insert({ project_id: projectId, user_id: userId, title: input.title, date: input.date, time: input.time || null })
-      .select()
-      .single();
-    if (error) return { ok: false, error: error.message };
-    return { ok: true, created: { type: "event", ...data } };
-  }
-  return { ok: false, error: "unknown_tool" };
+  return {
+    summary: event.title,
+    start: { date: event.date },
+    end: { date: event.date },
+  };
 }
 
 export default {
   fetch: withSupabase({ auth: "user" }, async (req, ctx) => {
     try {
-      const { supabase, userClaims } = ctx;
+      const { supabaseAdmin, userClaims } = ctx;
       const userId = userClaims!.id;
-      const { project_id, question } = await req.json();
-      if (!project_id || !question) return Response.json({ error: "missing_params" }, { status: 400 });
+      const { action, event } = await req.json();
 
-      const { data: project } = await supabase.from("projects").select("*").eq("id", project_id).maybeSingle();
-      if (!project) return Response.json({ error: "not_found" }, { status: 404 });
+      const { data: conn } = await supabaseAdmin
+        .from("calendar_connections")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("provider", "google")
+        .maybeSingle();
 
-      const [notesRes, tasksRes, eventsRes] = await Promise.all([
-        supabase.from("notes").select("title,body").eq("project_id", project_id),
-        supabase.from("tasks").select("text,done,due_date").eq("project_id", project_id),
-        supabase.from("events").select("title,date,time").eq("project_id", project_id),
-      ]);
+      if (!conn) return Response.json({ error: "not_connected" });
 
-      const notes = (notesRes.data || []) as NoteRow[];
-      const tasks = (tasksRes.data || []) as TaskRow[];
-      const events = (eventsRes.data || []) as EventRow[];
+      let accessToken = conn.access_token as string;
+      const isExpiringSoon = new Date(conn.expires_at).getTime() < Date.now() + 60_000;
 
-      const today = new Date().toISOString().slice(0, 10);
-
-      const lines: string[] = [];
-      lines.push(`Proyecto: ${project.name}`);
-      lines.push(`Fecha de hoy: ${today}`);
-      lines.push("");
-      lines.push(`Notas (${notes.length}):`);
-      if (notes.length === 0) lines.push("(ninguna)");
-      notes.forEach((n) => lines.push(`- ${n.title || "(sin título)"}: ${n.body || ""}`));
-      lines.push("");
-      lines.push(`Tareas (${tasks.length}):`);
-      if (tasks.length === 0) lines.push("(ninguna)");
-      tasks.forEach((t) => lines.push(`- [${t.done ? "hecha" : "pendiente"}]${t.due_date ? ` (vence ${t.due_date})` : ""} ${t.text}`));
-      lines.push("");
-      lines.push(`Agenda (${events.length}):`);
-      if (events.length === 0) lines.push("(ninguna)");
-      events.forEach((e) => lines.push(`- ${e.date}${e.time ? " " + e.time : ""}: ${e.title}`));
-
-      const context = lines.join("\n");
-
-      const systemPrompt =
-        "Eres un asistente que ayuda a revisar y gestionar un proyecto de trabajo a partir de sus notas, su agenda y " +
-        "sus tareas. Responde SIEMPRE en español, en un máximo de 2-3 frases cortas y directas, sin rodeos ni listas " +
-        "largas, y nunca uses markdown. " +
-        "Si el usuario solo pregunta o pide tu opinión, responde en texto: señala huecos o riesgos relevantes " +
-        "(reuniones sin tarea de seguimiento, plazos que chocan con la agenda, tareas sin fecha que deberían tenerla, " +
-        "contradicciones entre notas y planificación) sin inventar datos que no estén en el contexto. " +
-        "Si el usuario te pide EXPLÍCITAMENTE crear tareas o citas (por ejemplo 'créame tareas a partir de las notas' " +
-        "o 'añade una cita para X'), usa las herramientas create_task / create_event para crearlas de verdad, " +
-        "basándote en lo que digan las notas y usando la fecha de hoy como referencia para calcular fechas relativas " +
-        "en formato exacto YYYY-MM-DD (por ejemplo, si hoy es 2026-07-23 y las notas dicen 'mediados de septiembre', " +
-        "usa algo como 2026-09-15, no una frase). " +
-        "Después de cada llamada a una herramienta, comprueba el resultado: si dice ok: true, la acción se realizó de " +
-        "verdad (aunque venga con un 'note' avisando de algún detalle, como que se descartó una fecha mal formada); " +
-        "si dice ok: false, la acción NO se realizó en absoluto, aunque parte de los datos parecieran correctos. " +
-        "Nunca digas que algo se ha creado, ni siquiera parcialmente, si el resultado fue ok: false — en ese caso " +
-        "dilo con claridad como un fallo, sin inventar una historia de éxito parcial. No uses las herramientas si el " +
-        "usuario no lo ha pedido explícitamente.";
-
-      const messages: Array<{ role: string; content: unknown }> = [
-        { role: "user", content: `Contexto del proyecto:\n\n${context}\n\nPregunta: ${question}` },
-      ];
-
-      // deno-lint-ignore no-explicit-any
-      const created: any[] = [];
-      let finalText = "";
-      let stoppedCleanly = false;
-      let lastStopReason = "";
-
-      for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
-        const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+      if (isExpiringSoon) {
+        const refreshRes = await fetch("https://oauth2.googleapis.com/token", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-          },
-          body: JSON.stringify({
-            model: "claude-sonnet-5",
-            max_tokens: 4096,
-            system: systemPrompt,
-            tools,
-            messages,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            client_id: GOOGLE_CLIENT_ID,
+            client_secret: GOOGLE_CLIENT_SECRET,
+            refresh_token: conn.refresh_token,
+            grant_type: "refresh_token",
           }),
         });
+        const refreshData = await refreshRes.json();
+        if (!refreshRes.ok) return Response.json({ error: "refresh_failed", detail: refreshData });
 
-        const data = await anthropicRes.json();
-        if (!anthropicRes.ok) return Response.json({ error: "anthropic_error", detail: data });
-        lastStopReason = data.stop_reason || "";
-
-        // Solo actualizamos si hay texto real, para no pisar una respuesta ya buena
-        // con un turno posterior que solo llamó a herramientas sin añadir texto.
-        const textNow = (data.content || [])
-          .filter((b: { type: string }) => b.type === "text")
-          .map((b: { text: string }) => b.text)
-          .join("\n");
-        if (textNow) finalText = textNow;
-
-        const toolUses = (data.content || []).filter((b: { type: string }) => b.type === "tool_use");
-        if (toolUses.length === 0 || data.stop_reason !== "tool_use") {
-          stoppedCleanly = true;
-          break;
-        }
-
-        messages.push({ role: "assistant", content: data.content });
-
-        const toolResults = [];
-        for (const tu of toolUses as Array<{ id: string; name: string; input: Record<string, string> }>) {
-          const result = await runTool(supabase, project_id, userId, tu.name, tu.input);
-          if (result.ok && result.created) created.push(result.created);
-          toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(result) });
-        }
-        messages.push({ role: "user", content: toolResults });
+        accessToken = refreshData.access_token;
+        const newExpiresAt = new Date(Date.now() + refreshData.expires_in * 1000).toISOString();
+        await supabaseAdmin
+          .from("calendar_connections")
+          .update({ access_token: accessToken, expires_at: newExpiresAt })
+          .eq("user_id", userId)
+          .eq("provider", "google");
       }
 
-      if (!finalText) {
-        if (created.length > 0) {
-          finalText = `He creado ${created.length} elemento${created.length > 1 ? "s" : ""} en el proyecto.`;
-        } else if (!stoppedCleanly) {
-          finalText = "La petición necesitaba demasiados pasos y se ha detenido antes de terminar. Prueba a pedir menos cosas a la vez.";
-        } else {
-          finalText = `No he podido generar una respuesta de texto (motivo: ${lastStopReason || "desconocido"}), aunque la petición se ha procesado.`;
-        }
+      const calendarId = conn.calendar_id as string;
+      const base = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
+
+      if (action === "create") {
+        const res = await fetch(base, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify(buildGoogleEventBody(event)),
+        });
+        const data = await res.json();
+        if (!res.ok) return Response.json({ error: "google_api_error", detail: data });
+        return Response.json({ google_event_id: data.id });
       }
 
-      return Response.json({ answer: finalText, created });
+      if (action === "update") {
+        if (!event.google_event_id) return Response.json({ error: "missing_google_event_id" });
+        const res = await fetch(`${base}/${event.google_event_id}`, {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify(buildGoogleEventBody(event)),
+        });
+        const data = await res.json();
+        if (!res.ok) return Response.json({ error: "google_api_error", detail: data });
+        return Response.json({ ok: true });
+      }
+
+      if (action === "delete") {
+        if (!event.google_event_id) return Response.json({ ok: true });
+        await fetch(`${base}/${event.google_event_id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        return Response.json({ ok: true });
+      }
+
+      return Response.json({ error: "unknown_action" }, { status: 400 });
     } catch (e) {
       return Response.json({ error: "unexpected", detail: String(e) }, { status: 500 });
     }

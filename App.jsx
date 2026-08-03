@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
   Plus, X, Trash2, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, FileText, CalendarDays,
-  CheckSquare, Square, Loader2, FolderOpen, LogOut, Link2, CalendarCheck,
+  CheckSquare, Square, Loader2, FolderOpen, LogOut, Link2, Unlink2, CalendarCheck,
   Sparkles, Send, Pencil, History, Archive, ArchiveRestore, Search, Download, PenTool, Clock, Menu, MoveHorizontal
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
@@ -1253,6 +1253,8 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   const [saveError, setSaveError] = useState("");
   const [googleConnected, setGoogleConnected] = useState(false);
   const [connectingGoogle, setConnectingGoogle] = useState(false);
+  const [disconnectingGoogle, setDisconnectingGoogle] = useState(false);
+  const [confirmDisconnectGoogle, setConfirmDisconnectGoogle] = useState(false);
   const [calendarNotice, setCalendarNotice] = useState(null);
 
   const noteTimers = useRef({});
@@ -1316,6 +1318,18 @@ function LegajoApp({ userId, userEmail, onLogout }) {
       `&scope=${encodeURIComponent("https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/tasks")}` +
       `&state=${encodeURIComponent(token)}`;
     window.location.href = authUrl;
+  }
+
+  async function disconnectGoogle() {
+    setDisconnectingGoogle(true);
+    try {
+      await callEdgeFunction("disconnect-google");
+    } catch (e) {
+      // aunque falle la llamada, seguimos ocultando el estado conectado localmente
+    }
+    setGoogleConnected(false);
+    setConfirmDisconnectGoogle(false);
+    setDisconnectingGoogle(false);
   }
 
   async function loadProjects() {
@@ -1807,9 +1821,24 @@ function LegajoApp({ userId, userEmail, onLogout }) {
           {/* Pantallas anchas (iPad/escritorio): fila completa de botones */}
           <div className="hidden md:flex items-center gap-3">
             {googleConnected ? (
-              <span className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-md" style={{ background: SURFACE2, color: "#8fae7c" }}>
-                <CalendarCheck size={14} /> Google conectado
-              </span>
+              !confirmDisconnectGoogle ? (
+                <span className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-md" style={{ background: SURFACE2, color: "#8fae7c" }}>
+                  <CalendarCheck size={14} /> Google conectado
+                  <button onClick={() => setConfirmDisconnectGoogle(true)} title="Desconectar Google" style={{ color: "#8fae7c" }}>
+                    <Unlink2 size={13} />
+                  </button>
+                </span>
+              ) : (
+                <span className="flex items-center gap-2 text-xs px-3 py-2 rounded-md" style={{ background: SURFACE2, color: TEXT_LIGHT }}>
+                  ¿Desconectar?
+                  <button onClick={disconnectGoogle} disabled={disconnectingGoogle} className="px-2 py-1 rounded" style={{ background: "#8a3b2a", color: "#fff" }}>
+                    Sí
+                  </button>
+                  <button onClick={() => setConfirmDisconnectGoogle(false)} style={{ color: TEXT_MUTED }}>
+                    No
+                  </button>
+                </span>
+              )
             ) : (
               <button
                 onClick={connectGoogleCalendar}
@@ -1876,9 +1905,33 @@ function LegajoApp({ userId, userEmail, onLogout }) {
         {mobileMenuOpen && (
           <div className="md:hidden mb-6 rounded-lg p-2 flex flex-col gap-1" style={{ background: SURFACE2 }}>
             {googleConnected ? (
-              <span className="flex items-center gap-2 text-sm px-3 py-2.5 rounded-md" style={{ color: "#8fae7c" }}>
-                <CalendarCheck size={16} /> Google conectado
-              </span>
+              !confirmDisconnectGoogle ? (
+                <button
+                  onClick={() => setConfirmDisconnectGoogle(true)}
+                  className="flex items-center gap-2 text-sm px-3 py-2.5 rounded-md text-left"
+                  style={{ color: "#8fae7c" }}
+                >
+                  <CalendarCheck size={16} /> Google conectado (tocar para desconectar)
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 text-sm px-3 py-2.5">
+                  <span style={{ color: TEXT_LIGHT }}>¿Desconectar Google?</span>
+                  <button
+                    onClick={() => {
+                      disconnectGoogle();
+                      setMobileMenuOpen(false);
+                    }}
+                    disabled={disconnectingGoogle}
+                    className="px-2 py-1 rounded"
+                    style={{ background: "#8a3b2a", color: "#fff" }}
+                  >
+                    Sí
+                  </button>
+                  <button onClick={() => setConfirmDisconnectGoogle(false)} style={{ color: TEXT_MUTED }}>
+                    No
+                  </button>
+                </div>
+              )
             ) : (
               <button
                 onClick={() => {
