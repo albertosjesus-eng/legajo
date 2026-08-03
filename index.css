@@ -1,7 +1,30 @@
-export default {
-  content: ["./index.html", "./src/**/*.{js,jsx}"],
-  theme: {
-    extend: {},
-  },
-  plugins: [],
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+/* Rejilla de las 4 columnas del proyecto. En móvil/tablet siempre 1 o 2
+   columnas iguales; en escritorio (>=1024px) cada columna respeta el ancho
+   que el usuario haya elegido para ella (variable CSS, con 1fr por defecto). */
+.legajo-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+}
+@media (min-width: 768px) {
+  .legajo-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (min-width: 1024px) {
+  .legajo-grid {
+    grid-template-columns: var(--w-tareas, 1fr) var(--w-agenda, 1fr) var(--w-notas, 1fr) var(--w-claude, 1fr);
+  }
 }

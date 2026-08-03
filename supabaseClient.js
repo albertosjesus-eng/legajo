@@ -1,11 +1,12 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+import { createClient } from '@supabase/supabase-js'
 
-html, body, #root {
-  height: 100%;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.warn(
+    'Faltan VITE_SUPABASE_URL o VITE_SUPABASE_ANON_KEY. Copia .env.example a .env.local y rellena los valores de tu proyecto de Supabase.'
+  )
 }
 
-body {
-  margin: 0;
-}
+export const supabase = createClient(supabaseUrl, supabaseAnonKey)
