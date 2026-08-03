@@ -1269,7 +1269,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     const calError = params.get("calendar_error");
     const calDetail = params.get("detail");
     if (connected) {
-      setCalendarNotice({ type: "ok", text: "Google Calendar conectado. Se ha creado el calendario 'Legajo' en tu cuenta." });
+      setCalendarNotice({ type: "ok", text: "Google conectado. Se han creado el calendario y la lista de tareas 'Legajo' en tu cuenta." });
       setGoogleConnected(true);
     } else if (calError) {
       setCalendarNotice({
@@ -1313,7 +1313,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
       "&response_type=code" +
       "&access_type=offline" +
       "&prompt=consent" +
-      `&scope=${encodeURIComponent("https://www.googleapis.com/auth/calendar")}` +
+      `&scope=${encodeURIComponent("https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/tasks")}` +
       `&state=${encodeURIComponent(token)}`;
     window.location.href = authUrl;
   }
@@ -1602,6 +1602,27 @@ function LegajoApp({ userId, userEmail, onLogout }) {
       return false;
     }
     setProjectData((pd) => ({ ...pd, [activeId]: { ...pd[activeId], tasks: [...pd[activeId].tasks, task] } }));
+
+    if (googleConnected) {
+      try {
+        const { data } = await callEdgeFunction("sync-google-task", {
+          action: "create",
+          task: { text: task.text, due_date: task.due_date, done: task.done },
+        });
+        if (data?.google_task_id) {
+          await supabase.from("tasks").update({ google_task_id: data.google_task_id }).eq("id", task.id);
+          setProjectData((pd) => ({
+            ...pd,
+            [activeId]: {
+              ...pd[activeId],
+              tasks: pd[activeId].tasks.map((t) => (t.id === task.id ? { ...t, google_task_id: data.google_task_id } : t)),
+            },
+          }));
+        }
+      } catch (e) {
+        // si falla la sincronización, la tarea se queda igualmente guardada en Legajo
+      }
+    }
     return true;
   }
 
@@ -1619,19 +1640,45 @@ function LegajoApp({ userId, userEmail, onLogout }) {
         ...pd,
         [activeId]: { ...pd[activeId], tasks: pd[activeId].tasks.map((t) => (t.id === task.id ? { ...t, done: !done } : t)) },
       }));
+      return;
+    }
+    if (googleConnected && task.google_task_id) {
+      try {
+        await callEdgeFunction("sync-google-task", {
+          action: "update",
+          task: { google_task_id: task.google_task_id, text: task.text, due_date: task.due_date, done },
+        });
+      } catch (e) {
+        // si falla, el estado ya se ha guardado en Legajo
+      }
     }
   }
 
   async function deleteTask(id) {
+    const currentTasks = projectData[activeId]?.tasks || [];
+    const task = currentTasks.find((t) => t.id === id);
+
     const { error } = await supabase.from("tasks").delete().eq("id", id);
     if (error) {
       setSaveError("No se pudo eliminar la tarea: " + (error.message || "error desconocido"));
       return;
     }
     setProjectData((pd) => ({ ...pd, [activeId]: { ...pd[activeId], tasks: pd[activeId].tasks.filter((t) => t.id !== id) } }));
+
+    if (googleConnected && task?.google_task_id) {
+      try {
+        await callEdgeFunction("sync-google-task", {
+          action: "delete",
+          task: { google_task_id: task.google_task_id },
+        });
+      } catch (e) {
+        // si falla, la tarea ya se ha borrado en Legajo; quedará huérfana en Google
+      }
+    }
   }
 
   async function updateTask(id, patch) {
+    const before = (projectData[activeId]?.tasks || []).find((t) => t.id === id);
     setProjectData((pd) => ({
       ...pd,
       [activeId]: { ...pd[activeId], tasks: pd[activeId].tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)) },
@@ -1640,6 +1687,21 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     if (error) {
       setSaveError("No se pudo actualizar la tarea: " + (error.message || "error desconocido"));
       return false;
+    }
+    if (googleConnected && before?.google_task_id) {
+      try {
+        await callEdgeFunction("sync-google-task", {
+          action: "update",
+          task: {
+            google_task_id: before.google_task_id,
+            text: patch.text ?? before.text,
+            due_date: patch.due_date ?? before.due_date,
+            done: patch.done ?? before.done,
+          },
+        });
+      } catch (e) {
+        // si falla la sincronización, el cambio se queda igualmente guardado en Legajo
+      }
     }
     return true;
   }
@@ -1746,7 +1808,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
           <div className="hidden md:flex items-center gap-3">
             {googleConnected ? (
               <span className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-md" style={{ background: SURFACE2, color: "#8fae7c" }}>
-                <CalendarCheck size={14} /> Google Calendar conectado
+                <CalendarCheck size={14} /> Google conectado
               </span>
             ) : (
               <button
@@ -1756,7 +1818,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                 style={{ background: SURFACE2, color: TEXT_LIGHT, opacity: connectingGoogle ? 0.7 : 1 }}
               >
                 {connectingGoogle ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={15} />}
-                Conectar Google Calendar
+                Conectar con Google
               </button>
             )}
             <button
@@ -1815,7 +1877,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
           <div className="md:hidden mb-6 rounded-lg p-2 flex flex-col gap-1" style={{ background: SURFACE2 }}>
             {googleConnected ? (
               <span className="flex items-center gap-2 text-sm px-3 py-2.5 rounded-md" style={{ color: "#8fae7c" }}>
-                <CalendarCheck size={16} /> Google Calendar conectado
+                <CalendarCheck size={16} /> Google conectado
               </span>
             ) : (
               <button
@@ -1827,7 +1889,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                 className="flex items-center gap-2 text-sm px-3 py-2.5 rounded-md text-left"
                 style={{ color: TEXT_LIGHT }}
               >
-                <Link2 size={16} /> Conectar Google Calendar
+                <Link2 size={16} /> Conectar con Google
               </button>
             )}
             <button
