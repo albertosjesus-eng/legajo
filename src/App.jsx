@@ -1076,6 +1076,211 @@ function HomeSummary({ projects, timelineData, onOpenTimeline }) {
   );
 }
 
+function GlobalAskClaudePanel() {
+  const [question, setQuestion] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [lastQA, setLastQA] = useState(null);
+  const [error, setError] = useState("");
+  const accent = PALETTE[0].hex;
+
+  const ask = async () => {
+    if (!question.trim() || loading) return;
+    const q = question.trim();
+    setQuestion("");
+    setLoading(true);
+    setError("");
+    setLastQA(null);
+    try {
+      const { ok, status, data } = await callEdgeFunction("ask-claude-global", { question: q });
+      if (!ok || data?.error) {
+        const detail = data?.error
+          ? data.error + (data.detail ? ": " + (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : "")
+          : `HTTP ${status}`;
+        setError("No se pudo obtener respuesta (" + detail + ").");
+      } else {
+        setLastQA({ question: q, answer: data.answer });
+      }
+    } catch (e) {
+      setError("No se pudo obtener respuesta. Inténtalo de nuevo.");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="mb-6 p-4 rounded-lg" style={{ background: SURFACE2 }}>
+      <div className="flex items-center gap-1.5 mb-3 text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>
+        <Sparkles size={13} /> Preguntar a Claude sobre todos los proyectos
+      </div>
+      <div className="flex gap-2">
+        <input
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && ask()}
+          placeholder="Pregunta algo sobre cualquiera de tus proyectos..."
+          className="flex-1 px-3 py-2 rounded-md text-sm outline-none"
+          style={{ background: PAPER, color: INK_ON_PAPER }}
+        />
+        <button
+          onClick={ask}
+          disabled={loading}
+          className="px-3 rounded-md"
+          style={{ background: accent, color: "#fff", opacity: loading ? 0.7 : 1 }}
+        >
+          <Send size={16} />
+        </button>
+      </div>
+      {error && (
+        <div className="text-xs mt-2 px-3 py-2 rounded-md" style={{ background: "#4a2b23", color: "#f2d9d0" }}>
+          {error}
+        </div>
+      )}
+      {loading && (
+        <div className="flex items-center gap-2 text-xs mt-2" style={{ color: TEXT_MUTED }}>
+          <Loader2 size={13} className="animate-spin" /> Pensando...
+        </div>
+      )}
+      {lastQA && (
+        <div className="flex flex-col gap-1.5 mt-3">
+          <div
+            className="text-sm font-medium self-end px-3 py-1.5 rounded-md"
+            style={{ background: accent, color: "#fff", maxWidth: "90%" }}
+          >
+            {lastQA.question}
+          </div>
+          <div className="text-sm px-3 py-2 rounded-md whitespace-pre-wrap" style={{ background: PAPER, color: INK_ON_PAPER }}>
+            {lastQA.answer}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function dateToTime(dateStr) {
+  return new Date(dateStr + "T00:00:00").getTime();
+}
+
+function MilestonesTimeline({ projects, timelineData, onOpen }) {
+  if (!timelineData) return null;
+  const activeProjects = projects.filter((p) => !p.archived);
+  const projectById = Object.fromEntries(activeProjects.map((p) => [p.id, p]));
+  const labelWidth = 110;
+
+  const milestonesByProject = {};
+  timelineData.tasks.forEach((t) => {
+    if (t.done || !t.due_date) return;
+    const p = projectById[t.project_id];
+    if (!p) return;
+    (milestonesByProject[p.id] ||= []).push({
+      type: "task",
+      id: "task-" + t.id,
+      date: t.due_date,
+      label: t.text,
+    });
+  });
+  timelineData.events.forEach((e) => {
+    const p = projectById[e.project_id];
+    if (!p) return;
+    (milestonesByProject[p.id] ||= []).push({
+      type: "event",
+      id: "event-" + e.id,
+      date: e.date,
+      label: e.title,
+    });
+  });
+
+  const rows = activeProjects
+    .map((p) => ({ project: p, milestones: milestonesByProject[p.id] || [] }))
+    .filter((r) => r.milestones.length > 0);
+
+  if (rows.length === 0) return null;
+
+  const today = todayISO();
+  const allDates = rows.flatMap((r) => r.milestones.map((m) => m.date)).concat([today]);
+  let minDate = allDates.reduce((a, b) => (b < a ? b : a));
+  let maxDate = allDates.reduce((a, b) => (b > a ? b : a));
+
+  const minSpanDays = 7;
+  if ((dateToTime(maxDate) - dateToTime(minDate)) / 86400000 < minSpanDays) {
+    const center = (dateToTime(minDate) + dateToTime(maxDate)) / 2;
+    minDate = new Date(center - (minSpanDays / 2) * 86400000).toISOString().slice(0, 10);
+    maxDate = new Date(center + (minSpanDays / 2) * 86400000).toISOString().slice(0, 10);
+  }
+  const paddedMinT = dateToTime(minDate) - 2 * 86400000;
+  const paddedMaxT = dateToTime(maxDate) + 2 * 86400000;
+  const totalSpan = paddedMaxT - paddedMinT;
+
+  const posFor = (dateStr) => Math.max(0, Math.min(100, ((dateToTime(dateStr) - paddedMinT) / totalSpan) * 100));
+  const todayPos = posFor(today);
+  const fmt = (t) => new Date(t).toISOString().slice(5, 10).replace("-", "/");
+
+  return (
+    <div className="mb-6 p-4 rounded-lg" style={{ background: SURFACE2 }}>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>
+          <History size={13} /> Hitos de todos los proyectos
+        </div>
+        <div className="text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+          {fmt(paddedMinT)} — {fmt(paddedMaxT)}
+        </div>
+      </div>
+
+      <div className="relative">
+        <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: labelWidth, right: 0 }}>
+          <div className="absolute -top-4 text-[9px] font-mono" style={{ left: `${todayPos}%`, transform: "translateX(-50%)", color: "#e0b84a" }}>
+            HOY
+          </div>
+          <div className="absolute top-0 bottom-0 w-px" style={{ left: `${todayPos}%`, background: "#e0b84a", opacity: 0.5 }} />
+        </div>
+
+        <div className="flex flex-col gap-1 mt-2">
+          {rows.map((row) => (
+            <div key={row.project.id} className="flex items-center gap-2">
+              <div className="text-xs truncate shrink-0" style={{ width: labelWidth, color: TEXT_LIGHT }} title={row.project.name}>
+                {row.project.name}
+              </div>
+              <div className="relative flex-1" style={{ height: 22 }}>
+                {row.milestones.map((m) => {
+                  const overdue = m.type === "task" && m.date < today;
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => onOpen(row.project.id)}
+                      title={`${m.label} — ${m.date}`}
+                      className="absolute"
+                      style={{
+                        left: `${posFor(m.date)}%`,
+                        top: "50%",
+                        width: 9,
+                        height: 9,
+                        background: overdue ? "#e0836f" : row.project.color,
+                        borderRadius: m.type === "event" ? 2 : "50%",
+                        transform: m.type === "event" ? "translate(-50%, -50%) rotate(45deg)" : "translate(-50%, -50%)",
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4 mt-4 text-[10px]" style={{ color: TEXT_MUTED }}>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block rounded-full" style={{ width: 8, height: 8, background: TEXT_MUTED }} /> tarea
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block" style={{ width: 8, height: 8, background: TEXT_MUTED, transform: "rotate(45deg)" }} /> cita
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block rounded-full" style={{ width: 8, height: 8, background: "#e0836f" }} /> tarea vencida
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function SearchView({ projects, timelineData, loading, onOpen }) {
   const [query, setQuery] = useState("");
 
@@ -2092,6 +2297,8 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                 loadTimeline();
               }}
             />
+            <GlobalAskClaudePanel />
+            <MilestonesTimeline projects={projects} timelineData={timelineData} onOpen={openFromTimeline} />
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {[...projects]
                 .filter((p) => !p.archived)
