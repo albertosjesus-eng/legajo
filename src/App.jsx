@@ -444,7 +444,7 @@ function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, onSaveDrawing, 
             <button
               key={n.id}
               onClick={() => setOpenId(n.id)}
-              className="text-left p-3 rounded-md"
+              className="text-left p-3 rounded-md min-w-0 w-full"
               style={{ background: PAPER }}
             >
               <div className="font-serif text-sm truncate flex items-center gap-1.5" style={{ color: INK_ON_PAPER }}>

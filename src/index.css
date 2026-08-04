@@ -17,6 +17,10 @@ body {
   display: grid;
   grid-template-columns: 1fr;
   gap: 1.25rem;
+  min-width: 0;
+}
+.legajo-grid > * {
+  min-width: 0;
 }
 @media (min-width: 768px) {
   .legajo-grid {
