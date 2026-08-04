@@ -35,7 +35,7 @@ export default {
 
       const [notesRes, tasksRes, eventsRes] = await Promise.all([
         supabase.from("notes").select("project_id,title,body").in("project_id", projectIds),
-        supabase.from("tasks").select("project_id,text,done,due_date").in("project_id", projectIds),
+        supabase.from("tasks").select("project_id,text,done,due_date").in("project_id", projectIds).eq("done", false),
         supabase.from("events").select("project_id,title,date,time").in("project_id", projectIds),
       ]);
 
@@ -69,11 +69,9 @@ export default {
         if (pNotes.length === 0) lines.push("(ninguna)");
         pNotes.forEach((n) => lines.push(`- ${n.title || "(sin título)"}: ${n.body || ""}`));
 
-        lines.push(`Tareas (${pTasks.length}):`);
+        lines.push(`Tareas pendientes (${pTasks.length}):`);
         if (pTasks.length === 0) lines.push("(ninguna)");
-        pTasks.forEach((t) =>
-          lines.push(`- [${t.done ? "hecha" : "pendiente"}]${t.due_date ? ` (vence ${t.due_date})` : ""} ${t.text}`)
-        );
+        pTasks.forEach((t) => lines.push(`- ${t.due_date ? `(vence ${t.due_date}) ` : ""}${t.text}`));
 
         lines.push(`Agenda (${pEvents.length}):`);
         if (pEvents.length === 0) lines.push("(ninguna)");

@@ -1167,9 +1167,14 @@ function MilestonesTimeline({ projects, timelineData, onOpen }) {
   const projectById = Object.fromEntries(activeProjects.map((p) => [p.id, p]));
   const labelWidth = 110;
 
+  const today = todayISO();
+  const minDate = new Date(dateToTime(today) - 7 * 86400000).toISOString().slice(0, 10);
+  const maxDate = new Date(dateToTime(today) + 14 * 86400000).toISOString().slice(0, 10);
+  const inRange = (d) => d >= minDate && d <= maxDate;
+
   const milestonesByProject = {};
   timelineData.tasks.forEach((t) => {
-    if (t.done || !t.due_date) return;
+    if (t.done || !t.due_date || !inRange(t.due_date)) return;
     const p = projectById[t.project_id];
     if (!p) return;
     (milestonesByProject[p.id] ||= []).push({
@@ -1180,6 +1185,7 @@ function MilestonesTimeline({ projects, timelineData, onOpen }) {
     });
   });
   timelineData.events.forEach((e) => {
+    if (!inRange(e.date)) return;
     const p = projectById[e.project_id];
     if (!p) return;
     (milestonesByProject[p.id] ||= []).push({
@@ -1196,19 +1202,8 @@ function MilestonesTimeline({ projects, timelineData, onOpen }) {
 
   if (rows.length === 0) return null;
 
-  const today = todayISO();
-  const allDates = rows.flatMap((r) => r.milestones.map((m) => m.date)).concat([today]);
-  let minDate = allDates.reduce((a, b) => (b < a ? b : a));
-  let maxDate = allDates.reduce((a, b) => (b > a ? b : a));
-
-  const minSpanDays = 7;
-  if ((dateToTime(maxDate) - dateToTime(minDate)) / 86400000 < minSpanDays) {
-    const center = (dateToTime(minDate) + dateToTime(maxDate)) / 2;
-    minDate = new Date(center - (minSpanDays / 2) * 86400000).toISOString().slice(0, 10);
-    maxDate = new Date(center + (minSpanDays / 2) * 86400000).toISOString().slice(0, 10);
-  }
-  const paddedMinT = dateToTime(minDate) - 2 * 86400000;
-  const paddedMaxT = dateToTime(maxDate) + 2 * 86400000;
+  const paddedMinT = dateToTime(minDate);
+  const paddedMaxT = dateToTime(maxDate);
   const totalSpan = paddedMaxT - paddedMinT;
 
   const posFor = (dateStr) => Math.max(0, Math.min(100, ((dateToTime(dateStr) - paddedMinT) / totalSpan) * 100));
