@@ -1161,6 +1161,7 @@ function dateToTime(dateStr) {
 }
 
 function MilestonesTimeline({ projects, timelineData, onOpen }) {
+  const [expanded, setExpanded] = useState(false);
   if (!timelineData) return null;
   const activeProjects = projects.filter((p) => !p.archived);
   const projectById = Object.fromEntries(activeProjects.map((p) => [p.id, p]));
@@ -1216,16 +1217,28 @@ function MilestonesTimeline({ projects, timelineData, onOpen }) {
 
   return (
     <div className="mb-6 p-4 rounded-lg" style={{ background: SURFACE2 }}>
-      <div className="flex items-center justify-between mb-4">
+      <button onClick={() => setExpanded((e) => !e)} className="flex items-center justify-between w-full">
         <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>
           <History size={13} /> Hitos de todos los proyectos
+          {!expanded && (
+            <span className="normal-case" style={{ color: TEXT_MUTED }}>
+              ({rows.reduce((n, r) => n + r.milestones.length, 0)})
+            </span>
+          )}
         </div>
-        <div className="text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
-          {fmt(paddedMinT)} — {fmt(paddedMaxT)}
+        <div className="flex items-center gap-2">
+          {expanded && (
+            <span className="text-[10px] font-mono" style={{ color: TEXT_MUTED }}>
+              {fmt(paddedMinT)} — {fmt(paddedMaxT)}
+            </span>
+          )}
+          {expanded ? <ChevronUp size={13} style={{ color: TEXT_MUTED }} /> : <ChevronDown size={13} style={{ color: TEXT_MUTED }} />}
         </div>
-      </div>
+      </button>
 
-      <div className="relative">
+      {expanded && (
+        <>
+          <div className="relative mt-4">
         <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: labelWidth, right: 0 }}>
           <div className="absolute -top-4 text-[9px] font-mono" style={{ left: `${todayPos}%`, transform: "translateX(-50%)", color: "#e0b84a" }}>
             HOY
@@ -1277,6 +1290,8 @@ function MilestonesTimeline({ projects, timelineData, onOpen }) {
           <span className="inline-block rounded-full" style={{ width: 8, height: 8, background: "#e0836f" }} /> tarea vencida
         </span>
       </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1647,8 +1662,10 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     setLoadingTimeline(false);
   }
 
-  function getColumnState(projectId, key) {
-    return columnLayout[projectId]?.[key] || { width: "normal", collapsed: false };
+  function getColumnState(projectId, key, isEmpty) {
+    const stored = columnLayout[projectId]?.[key];
+    if (stored) return stored;
+    return { width: "normal", collapsed: !!isEmpty };
   }
 
   function setColumnState(projectId, key, patch) {
@@ -2488,16 +2505,16 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                   <div
                     className="legajo-grid"
                     style={{
-                      "--w-tareas": trackForColumn(getColumnState(active.id, "tareas")),
-                      "--w-agenda": trackForColumn(getColumnState(active.id, "agenda")),
-                      "--w-notas": trackForColumn(getColumnState(active.id, "notas")),
-                      "--w-claude": trackForColumn(getColumnState(active.id, "claude")),
+                      "--w-tareas": trackForColumn(getColumnState(active.id, "tareas", data.tasks.length === 0)),
+                      "--w-agenda": trackForColumn(getColumnState(active.id, "agenda", data.events.length === 0)),
+                      "--w-notas": trackForColumn(getColumnState(active.id, "notas", data.notes.length === 0)),
+                      "--w-claude": trackForColumn(getColumnState(active.id, "claude", false)),
                     }}
                   >
                     <ProjectColumn
                       icon={CheckSquare}
                       label="Tareas"
-                      state={getColumnState(active.id, "tareas")}
+                      state={getColumnState(active.id, "tareas", data.tasks.length === 0)}
                       onCycleWidth={() => cycleColumnWidth(active.id, "tareas")}
                       onToggleCollapse={() => toggleColumnCollapse(active.id, "tareas")}
                     >
@@ -2506,7 +2523,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                     <ProjectColumn
                       icon={CalendarDays}
                       label="Agenda"
-                      state={getColumnState(active.id, "agenda")}
+                      state={getColumnState(active.id, "agenda", data.events.length === 0)}
                       onCycleWidth={() => cycleColumnWidth(active.id, "agenda")}
                       onToggleCollapse={() => toggleColumnCollapse(active.id, "agenda")}
                     >
@@ -2515,7 +2532,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                     <ProjectColumn
                       icon={FileText}
                       label="Notas"
-                      state={getColumnState(active.id, "notas")}
+                      state={getColumnState(active.id, "notas", data.notes.length === 0)}
                       onCycleWidth={() => cycleColumnWidth(active.id, "notas")}
                       onToggleCollapse={() => toggleColumnCollapse(active.id, "notas")}
                     >
@@ -2533,7 +2550,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                     <ProjectColumn
                       icon={Sparkles}
                       label="Preguntar a Claude"
-                      state={getColumnState(active.id, "claude")}
+                      state={getColumnState(active.id, "claude", false)}
                       onCycleWidth={() => cycleColumnWidth(active.id, "claude")}
                       onToggleCollapse={() => toggleColumnCollapse(active.id, "claude")}
                     >
