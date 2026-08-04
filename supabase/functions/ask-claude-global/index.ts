@@ -21,7 +21,10 @@ export default {
       const { question } = await req.json();
       if (!question) return Response.json({ error: "missing_params" }, { status: 400 });
 
-      const { data: projectsData } = await supabase.from("projects").select("id,name").eq("archived", false);
+      const { data: projectsData, error: projectsError } = await supabase.from("projects").select("id,name").eq("archived", false);
+      if (projectsError) {
+        return Response.json({ error: "projects_query_failed", detail: projectsError.message });
+      }
       const projects = (projectsData || []) as ProjectRow[];
 
       if (projects.length === 0) {
@@ -35,6 +38,17 @@ export default {
         supabase.from("tasks").select("project_id,text,done,due_date").in("project_id", projectIds),
         supabase.from("events").select("project_id,title,date,time").in("project_id", projectIds),
       ]);
+
+      if (notesRes.error || tasksRes.error || eventsRes.error) {
+        return Response.json({
+          error: "data_query_failed",
+          detail: JSON.stringify({
+            notes: notesRes.error?.message,
+            tasks: tasksRes.error?.message,
+            events: eventsRes.error?.message,
+          }),
+        });
+      }
 
       const notes = (notesRes.data || []) as NoteRow[];
       const tasks = (tasksRes.data || []) as TaskRow[];
