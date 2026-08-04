@@ -1952,7 +1952,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
       try {
         const { data } = await callEdgeFunction("sync-calendar-event", {
           action: "create",
-          event: { title: ev.title, date: ev.date, time: ev.time },
+          event: { title: ev.title, date: ev.date, time: ev.time, time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone },
         });
         if (data?.google_event_id) {
           await supabase.from("events").update({ google_event_id: data.google_event_id }).eq("id", ev.id);
@@ -2023,6 +2023,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
             title: patch.title ?? before.title,
             date: patch.date ?? before.date,
             time: patch.time ?? before.time,
+            time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           },
         });
         if (data?.error) {

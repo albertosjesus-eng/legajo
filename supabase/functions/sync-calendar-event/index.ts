@@ -9,16 +9,28 @@ import { withSupabase } from "jsr:@supabase/server@^1";
 const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID")!;
 const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET")!;
 
-function buildGoogleEventBody(event: { title: string; date: string; time?: string | null }) {
+function addMinutesToNaiveDateTime(naive: string, minutes: number): string {
+  // "naive" = "YYYY-MM-DDTHH:MM:SS" sin zona horaria; se trata como aritmética
+  // de calendario pura (no como UTC real), solo para que el rollover de
+  // día/mes se calcule bien.
+  const [datePart, timePart] = naive.split("T");
+  const [y, mo, d] = datePart.split("-").map(Number);
+  const [h, mi, s] = timePart.split(":").map(Number);
+  const ms = Date.UTC(y, mo - 1, d, h, mi, s) + minutes * 60000;
+  const dt = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}T${pad(dt.getUTCHours())}:${pad(dt.getUTCMinutes())}:${pad(dt.getUTCSeconds())}`;
+}
+
+function buildGoogleEventBody(event: { title: string; date: string; time?: string | null; time_zone?: string | null }) {
   if (event.time) {
+    const timeZone = event.time_zone || "Europe/Madrid";
     const start = `${event.date}T${event.time}:00`;
-    const d = new Date(start);
-    d.setMinutes(d.getMinutes() + 60);
-    const end = d.toISOString().slice(0, 19);
+    const end = addMinutesToNaiveDateTime(start, 60);
     return {
       summary: event.title,
-      start: { dateTime: start },
-      end: { dateTime: end },
+      start: { dateTime: start, timeZone },
+      end: { dateTime: end, timeZone },
     };
   }
   return {
