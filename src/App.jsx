@@ -1837,9 +1837,11 @@ function LegajoApp({ userId, userEmail, onLogout }) {
               tasks: pd[activeId].tasks.map((t) => (t.id === task.id ? { ...t, google_task_id: data.google_task_id } : t)),
             },
           }));
+        } else if (data?.error) {
+          setSaveError("La tarea se guardó en Legajo, pero no se sincronizó con Google Tasks: " + data.error);
         }
       } catch (e) {
-        // si falla la sincronización, la tarea se queda igualmente guardada en Legajo
+        setSaveError("La tarea se guardó en Legajo, pero no se sincronizó con Google Tasks: " + String(e));
       }
     }
     return true;
@@ -1863,12 +1865,15 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     }
     if (googleConnected && task.google_task_id) {
       try {
-        await callEdgeFunction("sync-google-task", {
+        const { data } = await callEdgeFunction("sync-google-task", {
           action: "update",
           task: { google_task_id: task.google_task_id, text: task.text, due_date: task.due_date, done },
         });
+        if (data?.error) {
+          setSaveError("El estado se guardó en Legajo, pero no se sincronizó con Google Tasks: " + data.error);
+        }
       } catch (e) {
-        // si falla, el estado ya se ha guardado en Legajo
+        setSaveError("El estado se guardó en Legajo, pero no se sincronizó con Google Tasks: " + String(e));
       }
     }
   }
@@ -1886,12 +1891,15 @@ function LegajoApp({ userId, userEmail, onLogout }) {
 
     if (googleConnected && task?.google_task_id) {
       try {
-        await callEdgeFunction("sync-google-task", {
+        const { data } = await callEdgeFunction("sync-google-task", {
           action: "delete",
           task: { google_task_id: task.google_task_id },
         });
+        if (data?.error) {
+          setSaveError("La tarea se borró en Legajo, pero no en Google Tasks: " + data.error);
+        }
       } catch (e) {
-        // si falla, la tarea ya se ha borrado en Legajo; quedará huérfana en Google
+        setSaveError("La tarea se borró en Legajo, pero no en Google Tasks: " + String(e));
       }
     }
   }
@@ -1909,7 +1917,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     }
     if (googleConnected && before?.google_task_id) {
       try {
-        await callEdgeFunction("sync-google-task", {
+        const { data } = await callEdgeFunction("sync-google-task", {
           action: "update",
           task: {
             google_task_id: before.google_task_id,
@@ -1918,8 +1926,11 @@ function LegajoApp({ userId, userEmail, onLogout }) {
             done: patch.done ?? before.done,
           },
         });
+        if (data?.error) {
+          setSaveError("La tarea se actualizó en Legajo, pero no en Google Tasks: " + data.error);
+        }
       } catch (e) {
-        // si falla la sincronización, el cambio se queda igualmente guardado en Legajo
+        setSaveError("La tarea se actualizó en Legajo, pero no en Google Tasks: " + String(e));
       }
     }
     return true;
@@ -1952,9 +1963,15 @@ function LegajoApp({ userId, userEmail, onLogout }) {
               events: pd[activeId].events.map((e) => (e.id === ev.id ? { ...e, google_event_id: data.google_event_id } : e)),
             },
           }));
+        } else if (data?.error) {
+          setSaveError(
+            "La cita se guardó en Legajo, pero no se sincronizó con Google Calendar: " +
+              data.error +
+              (data.detail ? " — " + JSON.stringify(data.detail) : "")
+          );
         }
       } catch (e) {
-        // si falla la sincronización, el evento se queda igualmente guardado en Legajo
+        setSaveError("La cita se guardó en Legajo, pero no se sincronizó con Google Calendar: " + String(e));
       }
     }
     return true;
@@ -1973,12 +1990,15 @@ function LegajoApp({ userId, userEmail, onLogout }) {
 
     if (googleConnected && ev?.google_event_id) {
       try {
-        await callEdgeFunction("sync-calendar-event", {
+        const { data } = await callEdgeFunction("sync-calendar-event", {
           action: "delete",
           event: { google_event_id: ev.google_event_id },
         });
+        if (data?.error) {
+          setSaveError("La cita se borró en Legajo, pero no en Google Calendar: " + data.error);
+        }
       } catch (e) {
-        // si falla, el evento ya se ha borrado en Legajo; quedará huérfano en Google
+        setSaveError("La cita se borró en Legajo, pero no en Google Calendar: " + String(e));
       }
     }
   }
@@ -1996,7 +2016,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     }
     if (googleConnected && before?.google_event_id) {
       try {
-        await callEdgeFunction("sync-calendar-event", {
+        const { data } = await callEdgeFunction("sync-calendar-event", {
           action: "update",
           event: {
             google_event_id: before.google_event_id,
@@ -2005,8 +2025,11 @@ function LegajoApp({ userId, userEmail, onLogout }) {
             time: patch.time ?? before.time,
           },
         });
+        if (data?.error) {
+          setSaveError("La cita se actualizó en Legajo, pero no en Google Calendar: " + data.error);
+        }
       } catch (e) {
-        // si falla la sincronización, el cambio se queda igualmente guardado en Legajo
+        setSaveError("La cita se actualizó en Legajo, pero no en Google Calendar: " + String(e));
       }
     }
     return true;

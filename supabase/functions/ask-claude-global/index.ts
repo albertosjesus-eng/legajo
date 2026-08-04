@@ -72,12 +72,17 @@ export default {
 
       const systemPrompt =
         "Eres un asistente que ayuda a revisar TODOS los proyectos activos de un usuario a la vez (notas, agenda y " +
-        "tareas de cada uno, agrupados por proyecto). Responde SIEMPRE en español, en un máximo de 3-4 frases cortas " +
-        "y directas, sin listas largas, y nunca uses markdown. Cuando menciones algo concreto, di de qué proyecto es " +
-        "(usa el nombre del proyecto tal cual aparece). Señala huecos o riesgos relevantes que veas cruzando " +
-        "proyectos: tareas vencidas, citas próximas sin tarea asociada, contradicciones, etc. No inventes datos que " +
-        "no estén en el contexto; si falta información, dilo en vez de suponer. No puedes crear ni modificar nada, " +
-        "solo responder.";
+        "tareas de cada uno, agrupados por proyecto). Responde SIEMPRE en español. " +
+        "Ajusta la longitud a lo que se te pida: para una pregunta simple, responde en 2-4 frases. Para peticiones " +
+        "de planificación semanal, priorización, pequeños informes de avance, o síntesis entre varios proyectos, " +
+        "responde con la extensión y estructura que haga falta para ser realmente útil — puedes organizar la " +
+        "respuesta por proyecto, usar saltos de línea y guiones para listas, pero no uses símbolos de markdown como " +
+        "asteriscos o almohadillas (el texto se muestra tal cual, sin formato enriquecido). " +
+        "Cuando menciones algo concreto, di de qué proyecto es (usa el nombre del proyecto tal cual aparece). " +
+        "Señala huecos o riesgos relevantes que veas cruzando proyectos: tareas vencidas, citas próximas sin tarea " +
+        "asociada, contradicciones, sobrecarga de una semana frente a otra, etc. No inventes datos que no estén en " +
+        "el contexto; si falta información, dilo en vez de suponer. No puedes crear ni modificar nada, solo " +
+        "responder.";
 
       const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -88,7 +93,7 @@ export default {
         },
         body: JSON.stringify({
           model: "claude-sonnet-5",
-          max_tokens: 2048,
+          max_tokens: 4096,
           system: systemPrompt,
           messages: [
             {
