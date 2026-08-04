@@ -62,6 +62,7 @@ export default {
       headers: { Authorization: `Bearer ${access_token}` },
     });
     const listData = await listRes.json();
+    if (!listRes.ok) return redirectWithParam("calendar_error=calendarlist_query_failed", JSON.stringify(listData));
     const existing = (listData.items || []).find((c: { summary?: string; id?: string }) => c.summary === "Legajo");
 
     if (existing) {
@@ -85,6 +86,7 @@ export default {
       headers: { Authorization: `Bearer ${access_token}` },
     });
     const taskListsData = await taskListsRes.json();
+    if (!taskListsRes.ok) return redirectWithParam("calendar_error=tasklists_query_failed", JSON.stringify(taskListsData));
     const existingList = (taskListsData.items || []).find((l: { title?: string; id?: string }) => l.title === "Legajo");
 
     if (existingList) {

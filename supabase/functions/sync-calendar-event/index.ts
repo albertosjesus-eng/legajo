@@ -110,10 +110,14 @@ export default {
 
       if (action === "delete") {
         if (!event.google_event_id) return Response.json({ ok: true });
-        await fetch(`${base}/${event.google_event_id}`, {
+        const delRes = await fetch(`${base}/${event.google_event_id}`, {
           method: "DELETE",
           headers: { Authorization: `Bearer ${accessToken}` },
         });
+        if (!delRes.ok && delRes.status !== 404 && delRes.status !== 410) {
+          const delData = await delRes.json().catch(() => null);
+          return Response.json({ ok: true, warning: "google_delete_failed", detail: JSON.stringify(delData) });
+        }
         return Response.json({ ok: true });
       }
 

@@ -98,7 +98,8 @@ export default {
       const { project_id, question } = await req.json();
       if (!project_id || !question) return Response.json({ error: "missing_params" }, { status: 400 });
 
-      const { data: project } = await supabase.from("projects").select("*").eq("id", project_id).maybeSingle();
+      const { data: project, error: projectError } = await supabase.from("projects").select("*").eq("id", project_id).maybeSingle();
+      if (projectError) return Response.json({ error: "project_query_failed", detail: projectError.message });
       if (!project) return Response.json({ error: "not_found" }, { status: 404 });
 
       const [notesRes, tasksRes, eventsRes] = await Promise.all([
@@ -106,6 +107,16 @@ export default {
         supabase.from("tasks").select("text,done,due_date").eq("project_id", project_id),
         supabase.from("events").select("title,date,time").eq("project_id", project_id),
       ]);
+      if (notesRes.error || tasksRes.error || eventsRes.error) {
+        return Response.json({
+          error: "data_query_failed",
+          detail: JSON.stringify({
+            notes: notesRes.error?.message,
+            tasks: tasksRes.error?.message,
+            events: eventsRes.error?.message,
+          }),
+        });
+      }
 
       const notes = (notesRes.data || []) as NoteRow[];
       const tasks = (tasksRes.data || []) as TaskRow[];

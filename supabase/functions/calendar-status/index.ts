@@ -5,10 +5,14 @@ import { withSupabase } from "jsr:@supabase/server@^1";
 export default {
   fetch: withSupabase({ auth: "user" }, async (_req, ctx) => {
     const { supabaseAdmin, userClaims } = ctx;
-    const { data } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from("calendar_connections")
       .select("provider,connected_at")
       .eq("user_id", userClaims!.id);
+
+    if (error) {
+      return Response.json({ error: "status_query_failed", detail: error.message }, { status: 500 });
+    }
 
     const rows = data || [];
     const google = rows.find((r: { provider: string }) => r.provider === "google");

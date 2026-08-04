@@ -1512,9 +1512,12 @@ function LegajoApp({ userId, userEmail, onLogout }) {
         setGoogleConnected(true);
         setGoogleNeedsReconnect(!!data.google_needs_reconnect);
         setGoogleDaysLeft(typeof data.google_days_left === "number" ? data.google_days_left : null);
+      } else if (data?.error) {
+        setSaveError("No se pudo comprobar el estado de la conexión con Google: " + data.error);
       }
     } catch (e) {
-      // silencioso: si falla, simplemente se mostrará el botón de conectar
+      // silencioso: es una comprobación de fondo al abrir la app; si falla, el
+      // peor caso es que se muestre el botón de conectar aunque ya lo estuvieras
     }
   }
 
@@ -1544,9 +1547,12 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   async function disconnectGoogle() {
     setDisconnectingGoogle(true);
     try {
-      await callEdgeFunction("disconnect-google");
+      const { ok, data } = await callEdgeFunction("disconnect-google");
+      if (!ok || data?.error) {
+        setSaveError("Es posible que la desconexión no se haya completado del todo en el servidor: " + (data?.error || "error desconocido"));
+      }
     } catch (e) {
-      // aunque falle la llamada, seguimos ocultando el estado conectado localmente
+      setSaveError("Es posible que la desconexión no se haya completado del todo en el servidor: " + String(e));
     }
     setGoogleConnected(false);
     setConfirmDisconnectGoogle(false);
@@ -1578,6 +1584,12 @@ function LegajoApp({ userId, userEmail, onLogout }) {
       supabase.from("tasks").select("*").eq("project_id", id),
       supabase.from("events").select("*").eq("project_id", id),
     ]);
+    if (notesRes.error || tasksRes.error || eventsRes.error) {
+      setSaveError(
+        "No se pudo cargar el proyecto por completo: " +
+          [notesRes.error?.message, tasksRes.error?.message, eventsRes.error?.message].filter(Boolean).join(" / ")
+      );
+    }
     setProjectData((pd) => ({
       ...pd,
       [id]: {
@@ -1649,6 +1661,12 @@ function LegajoApp({ userId, userEmail, onLogout }) {
       supabase.from("events").select("id,project_id,title,date,time"),
       supabase.from("notes").select("id,project_id,title,body,updated_at"),
     ]);
+    if (tasksRes.error || eventsRes.error || notesRes.error) {
+      setSaveError(
+        "No se pudo cargar la cronología por completo: " +
+          [tasksRes.error?.message, eventsRes.error?.message, notesRes.error?.message].filter(Boolean).join(" / ")
+      );
+    }
     setTimelineData({
       tasks: tasksRes.data || [],
       events: eventsRes.data || [],
@@ -1702,6 +1720,14 @@ function LegajoApp({ userId, userEmail, onLogout }) {
         supabase.from("tasks").select("project_id,text,done,due_date"),
         supabase.from("events").select("project_id,title,date,time"),
       ]);
+      if (notesRes.error || tasksRes.error || eventsRes.error) {
+        setSaveError(
+          "No se pudo exportar: " +
+            [notesRes.error?.message, tasksRes.error?.message, eventsRes.error?.message].filter(Boolean).join(" / ")
+        );
+        setExporting(false);
+        return;
+      }
       const notesAll = notesRes.data || [];
       const tasksAll = tasksRes.data || [];
       const eventsAll = eventsRes.data || [];
@@ -1779,7 +1805,10 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   async function saveDrawing(noteId, canvas, hasStrokes) {
     const path = `${userId}/${noteId}.png`;
     if (!hasStrokes) {
-      await supabase.storage.from("note-drawings").remove([path]);
+      const { error: removeError } = await supabase.storage.from("note-drawings").remove([path]);
+      if (removeError && removeError.message && !/not.?found/i.test(removeError.message)) {
+        return { ok: false, error: "no se pudo borrar el dibujo anterior: " + removeError.message };
+      }
       const { error } = await supabase.from("notes").update({ has_drawing: false }).eq("id", noteId);
       if (error) return { ok: false, error: error.message };
       setProjectData((pd) => ({
@@ -1847,7 +1876,10 @@ function LegajoApp({ userId, userEmail, onLogout }) {
           task: { text: task.text, due_date: task.due_date, done: task.done },
         });
         if (data?.google_task_id) {
-          await supabase.from("tasks").update({ google_task_id: data.google_task_id }).eq("id", task.id);
+          const { error: linkErr } = await supabase.from("tasks").update({ google_task_id: data.google_task_id }).eq("id", task.id);
+          if (linkErr) {
+            setSaveError("La tarea se creó en Google Tasks, pero no se pudo enlazar en Legajo: " + linkErr.message);
+          }
           setProjectData((pd) => ({
             ...pd,
             [activeId]: {
@@ -1973,7 +2005,10 @@ function LegajoApp({ userId, userEmail, onLogout }) {
           event: { title: ev.title, date: ev.date, time: ev.time, time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone },
         });
         if (data?.google_event_id) {
-          await supabase.from("events").update({ google_event_id: data.google_event_id }).eq("id", ev.id);
+          const { error: linkErr } = await supabase.from("events").update({ google_event_id: data.google_event_id }).eq("id", ev.id);
+          if (linkErr) {
+            setSaveError("La cita se creó en Google Calendar, pero no se pudo enlazar en Legajo: " + linkErr.message);
+          }
           setProjectData((pd) => ({
             ...pd,
             [activeId]: {
