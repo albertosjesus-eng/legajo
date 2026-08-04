@@ -2508,7 +2508,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                       "--w-tareas": trackForColumn(getColumnState(active.id, "tareas", data.tasks.length === 0)),
                       "--w-agenda": trackForColumn(getColumnState(active.id, "agenda", data.events.length === 0)),
                       "--w-notas": trackForColumn(getColumnState(active.id, "notas", data.notes.length === 0)),
-                      "--w-claude": trackForColumn(getColumnState(active.id, "claude", false)),
+                      "--w-claude": trackForColumn(getColumnState(active.id, "claude", true)),
                     }}
                   >
                     <ProjectColumn
@@ -2550,7 +2550,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                     <ProjectColumn
                       icon={Sparkles}
                       label="Preguntar a Claude"
-                      state={getColumnState(active.id, "claude", false)}
+                      state={getColumnState(active.id, "claude", true)}
                       onCycleWidth={() => cycleColumnWidth(active.id, "claude")}
                       onToggleCollapse={() => toggleColumnCollapse(active.id, "claude")}
                     >
