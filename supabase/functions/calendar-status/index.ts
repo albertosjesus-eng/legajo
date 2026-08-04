@@ -7,9 +7,25 @@ export default {
     const { supabaseAdmin, userClaims } = ctx;
     const { data } = await supabaseAdmin
       .from("calendar_connections")
-      .select("provider")
+      .select("provider,connected_at")
       .eq("user_id", userClaims!.id);
 
-    return Response.json({ connections: (data || []).map((d: { provider: string }) => d.provider) });
+    const rows = data || [];
+    const google = rows.find((r: { provider: string }) => r.provider === "google");
+
+    let needsReconnect = false;
+    let daysLeft: number | null = null;
+    if (google?.connected_at) {
+      const connectedAt = new Date(google.connected_at).getTime();
+      const msLeft = connectedAt + 7 * 24 * 60 * 60 * 1000 - Date.now();
+      daysLeft = Math.ceil(msLeft / (24 * 60 * 60 * 1000));
+      needsReconnect = msLeft <= 0;
+    }
+
+    return Response.json({
+      connections: rows.map((d: { provider: string }) => d.provider),
+      google_needs_reconnect: needsReconnect,
+      google_days_left: daysLeft,
+    });
   }),
 };

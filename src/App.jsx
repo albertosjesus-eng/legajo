@@ -1458,6 +1458,8 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   const [saveError, setSaveError] = useState("");
   const [googleConnected, setGoogleConnected] = useState(false);
   const [connectingGoogle, setConnectingGoogle] = useState(false);
+  const [googleNeedsReconnect, setGoogleNeedsReconnect] = useState(false);
+  const [googleDaysLeft, setGoogleDaysLeft] = useState(null);
   const [disconnectingGoogle, setDisconnectingGoogle] = useState(false);
   const [confirmDisconnectGoogle, setConfirmDisconnectGoogle] = useState(false);
   const [calendarNotice, setCalendarNotice] = useState(null);
@@ -1496,7 +1498,11 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     if (!token) return;
     try {
       const { data } = await callEdgeFunction("calendar-status");
-      if (data?.connections?.includes("google")) setGoogleConnected(true);
+      if (data?.connections?.includes("google")) {
+        setGoogleConnected(true);
+        setGoogleNeedsReconnect(!!data.google_needs_reconnect);
+        setGoogleDaysLeft(typeof data.google_days_left === "number" ? data.google_days_left : null);
+      }
     } catch (e) {
       // silencioso: si falla, simplemente se mostrará el botón de conectar
     }
@@ -2049,9 +2055,24 @@ function LegajoApp({ userId, userEmail, onLogout }) {
 
           {/* Pantallas anchas (iPad/escritorio): fila completa de botones */}
           <div className="hidden md:flex items-center gap-3">
-            {googleConnected ? (
+            {googleConnected && googleNeedsReconnect ? (
+              <button
+                onClick={connectGoogleCalendar}
+                disabled={connectingGoogle}
+                className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-md"
+                style={{ background: "#5a4420", color: "#e0b84a", opacity: connectingGoogle ? 0.7 : 1 }}
+                title="El permiso de Google caduca cada 7 días en modo de pruebas — un toque para renovarlo"
+              >
+                {connectingGoogle ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
+                Reconectar Google
+              </button>
+            ) : googleConnected ? (
               !confirmDisconnectGoogle ? (
-                <span className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-md" style={{ background: SURFACE2, color: "#8fae7c" }}>
+                <span
+                  className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-md"
+                  style={{ background: SURFACE2, color: "#8fae7c" }}
+                  title={googleDaysLeft !== null ? `Se renueva sola en ${googleDaysLeft} día${googleDaysLeft === 1 ? "" : "s"}` : undefined}
+                >
                   <CalendarCheck size={14} /> Google conectado
                   <button onClick={() => setConfirmDisconnectGoogle(true)} title="Desconectar Google" style={{ color: "#8fae7c" }}>
                     <Unlink2 size={13} />
@@ -2133,7 +2154,18 @@ function LegajoApp({ userId, userEmail, onLogout }) {
 
         {mobileMenuOpen && (
           <div className="md:hidden mb-6 rounded-lg p-2 flex flex-col gap-1" style={{ background: SURFACE2 }}>
-            {googleConnected ? (
+            {googleConnected && googleNeedsReconnect ? (
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  connectGoogleCalendar();
+                }}
+                className="flex items-center gap-2 text-sm px-3 py-2.5 rounded-md text-left"
+                style={{ background: "#5a4420", color: "#e0b84a" }}
+              >
+                <Link2 size={16} /> Reconectar Google (caducado)
+              </button>
+            ) : googleConnected ? (
               !confirmDisconnectGoogle ? (
                 <button
                   onClick={() => setConfirmDisconnectGoogle(true)}
@@ -2313,6 +2345,19 @@ function LegajoApp({ userId, userEmail, onLogout }) {
           </div>
         ) : view === "home" ? (
           <div>
+            {googleConnected && googleNeedsReconnect && (
+              <button
+                onClick={connectGoogleCalendar}
+                disabled={connectingGoogle}
+                className="w-full mb-4 px-4 py-3 rounded-lg text-sm text-left flex items-center justify-between"
+                style={{ background: "#5a4420", color: "#e0b84a" }}
+              >
+                <span className="flex items-center gap-2">
+                  {connectingGoogle ? <Loader2 size={15} className="animate-spin" /> : <Link2 size={15} />}
+                  El permiso de Google ha caducado (pasan 7 días en modo de pruebas) — toca para reconectar en un paso
+                </span>
+              </button>
+            )}
             <HomeSummary
               projects={projects}
               timelineData={timelineData}

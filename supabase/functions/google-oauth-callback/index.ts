@@ -114,6 +114,7 @@ export default {
         expires_at: expiresAt,
         calendar_id: calendarId,
         task_list_id: taskListId,
+        connected_at: new Date().toISOString(),
       },
       { onConflict: "user_id,provider" }
     );
