@@ -123,10 +123,11 @@ function ProjectHeader({ project, onUpdate }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(project.name);
   const [color, setColor] = useState(project.color);
+  const [category, setCategory] = useState(project.category || "operativo");
 
   const save = async () => {
     if (!name.trim()) return;
-    const ok = await onUpdate(project.id, { name: name.trim(), color });
+    const ok = await onUpdate(project.id, { name: name.trim(), color, category });
     if (ok) setEditing(false);
   };
 
@@ -141,6 +142,30 @@ function ProjectHeader({ project, onUpdate }) {
           className="px-3 py-2 rounded-md text-sm outline-none"
           style={{ background: PAPER, color: INK_ON_PAPER }}
         />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setCategory("operativo")}
+            className="text-xs px-3 py-1.5 rounded-md"
+            style={{
+              background: category === "operativo" ? TEXT_LIGHT : "transparent",
+              color: category === "operativo" ? INK : TEXT_MUTED,
+              border: `1px solid ${category === "operativo" ? TEXT_LIGHT : "rgba(255,255,255,0.2)"}`,
+            }}
+          >
+            Operativo
+          </button>
+          <button
+            onClick={() => setCategory("estrategico")}
+            className="text-xs px-3 py-1.5 rounded-md"
+            style={{
+              background: category === "estrategico" ? TEXT_LIGHT : "transparent",
+              color: category === "estrategico" ? INK : TEXT_MUTED,
+              border: `1px solid ${category === "estrategico" ? TEXT_LIGHT : "rgba(255,255,255,0.2)"}`,
+            }}
+          >
+            Estratégico
+          </button>
+        </div>
         <div className="flex items-center gap-2 flex-wrap">
           {PALETTE.map((c) => (
             <button
@@ -169,6 +194,9 @@ function ProjectHeader({ project, onUpdate }) {
       <h2 className="text-lg font-serif truncate" style={{ color: TEXT_LIGHT }}>
         {project.name}
       </h2>
+      <span className="text-[10px] uppercase tracking-wide shrink-0" style={{ color: TEXT_MUTED }}>
+        {project.category === "estrategico" ? "Estratégico" : "Operativo"}
+      </span>
       <button onClick={() => setEditing(true)} className="opacity-70 hover:opacity-100 shrink-0" style={{ color: TEXT_MUTED }}>
         <Pencil size={13} />
       </button>
@@ -1463,6 +1491,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   const [showNewProject, setShowNewProject] = useState(false);
   const [newName, setNewName] = useState("");
   const [newColor, setNewColor] = useState(PALETTE[0].hex);
+  const [newCategory, setNewCategory] = useState("operativo");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [saveError, setSaveError] = useState("");
@@ -1605,7 +1634,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     if (!newName.trim()) return;
     const { data, error } = await supabase
       .from("projects")
-      .insert({ name: newName.trim(), color: newColor, user_id: userId })
+      .insert({ name: newName.trim(), color: newColor, user_id: userId, category: newCategory })
       .select()
       .single();
     if (!error && data) {
@@ -1617,6 +1646,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
       setSaveError("No se pudo crear el proyecto: " + (error?.message || "error desconocido"));
     }
     setNewName("");
+    setNewCategory("operativo");
     setShowNewProject(false);
   }
 
@@ -2354,6 +2384,30 @@ function LegajoApp({ userId, userEmail, onLogout }) {
               className="px-3 py-2 rounded-md text-sm outline-none"
               style={{ background: PAPER, color: INK_ON_PAPER }}
             />
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setNewCategory("operativo")}
+                className="text-xs px-3 py-1.5 rounded-md"
+                style={{
+                  background: newCategory === "operativo" ? TEXT_LIGHT : "transparent",
+                  color: newCategory === "operativo" ? INK : TEXT_MUTED,
+                  border: `1px solid ${newCategory === "operativo" ? TEXT_LIGHT : "rgba(255,255,255,0.2)"}`,
+                }}
+              >
+                Operativo
+              </button>
+              <button
+                onClick={() => setNewCategory("estrategico")}
+                className="text-xs px-3 py-1.5 rounded-md"
+                style={{
+                  background: newCategory === "estrategico" ? TEXT_LIGHT : "transparent",
+                  color: newCategory === "estrategico" ? INK : TEXT_MUTED,
+                  border: `1px solid ${newCategory === "estrategico" ? TEXT_LIGHT : "rgba(255,255,255,0.2)"}`,
+                }}
+              >
+                Estratégico
+              </button>
+            </div>
             <div className="flex items-center gap-2 flex-wrap">
               {PALETTE.map((c) => (
                 <button
@@ -2415,14 +2469,57 @@ function LegajoApp({ userId, userEmail, onLogout }) {
             />
             <GlobalAskClaudePanel />
             <MilestonesTimeline projects={projects} timelineData={timelineData} onOpen={openFromTimeline} />
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {[...projects]
-                .filter((p) => !p.archived)
-                .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at))
-                .map((p) => (
-                  <ProjectCard key={p.id} project={p} onOpen={openProject} />
-                ))}
+
+            <div className="mb-8">
+              <h2 className="text-lg font-serif mb-3" style={{ color: TEXT_LIGHT }}>
+                Estratégicos
+              </h2>
+              {(() => {
+                const strategic = [...projects]
+                  .filter((p) => !p.archived && p.category === "estrategico")
+                  .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+                if (strategic.length === 0) {
+                  return (
+                    <p className="text-sm" style={{ color: TEXT_MUTED }}>
+                      Aún no tienes proyectos estratégicos.
+                    </p>
+                  );
+                }
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {strategic.map((p) => (
+                      <ProjectCard key={p.id} project={p} onOpen={openProject} />
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
+
+            <div className="mb-6">
+              <h2 className="text-lg font-serif mb-3" style={{ color: TEXT_LIGHT }}>
+                Operativos
+              </h2>
+              {(() => {
+                const operational = [...projects]
+                  .filter((p) => !p.archived && p.category !== "estrategico")
+                  .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+                if (operational.length === 0) {
+                  return (
+                    <p className="text-sm" style={{ color: TEXT_MUTED }}>
+                      Aún no tienes proyectos operativos.
+                    </p>
+                  );
+                }
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {operational.map((p) => (
+                      <ProjectCard key={p.id} project={p} onOpen={openProject} />
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+
             {projects.some((p) => p.archived) && (
               <div className="mt-6">
                 {!showArchived ? (
