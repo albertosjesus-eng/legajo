@@ -1482,6 +1482,8 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   const [timelineData, setTimelineData] = useState(null);
   const [loadingTimeline, setLoadingTimeline] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [strategicCollapsed, setStrategicCollapsed] = useState(false);
+  const [operationalCollapsed, setOperationalCollapsed] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [columnLayout, setColumnLayout] = useState({});
@@ -2471,53 +2473,75 @@ function LegajoApp({ userId, userEmail, onLogout }) {
             <MilestonesTimeline projects={projects} timelineData={timelineData} onOpen={openFromTimeline} />
 
             <div className="mb-8">
-              <h2 className="text-lg font-serif mb-3" style={{ color: TEXT_LIGHT }}>
-                Estratégicos
-              </h2>
-              {(() => {
-                const strategic = [...projects]
-                  .filter((p) => !p.archived && p.category === "estrategico")
-                  .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
-                if (strategic.length === 0) {
+              <button
+                onClick={() => setStrategicCollapsed((c) => !c)}
+                className="flex items-center gap-2 mb-3"
+              >
+                <h2 className="text-lg font-serif" style={{ color: TEXT_LIGHT }}>
+                  Estratégicos
+                </h2>
+                {strategicCollapsed ? (
+                  <ChevronRight size={16} style={{ color: TEXT_MUTED }} />
+                ) : (
+                  <ChevronDown size={16} style={{ color: TEXT_MUTED }} />
+                )}
+              </button>
+              {!strategicCollapsed &&
+                (() => {
+                  const strategic = [...projects]
+                    .filter((p) => !p.archived && p.category === "estrategico")
+                    .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+                  if (strategic.length === 0) {
+                    return (
+                      <p className="text-sm" style={{ color: TEXT_MUTED }}>
+                        Aún no tienes proyectos estratégicos.
+                      </p>
+                    );
+                  }
                   return (
-                    <p className="text-sm" style={{ color: TEXT_MUTED }}>
-                      Aún no tienes proyectos estratégicos.
-                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {strategic.map((p) => (
+                        <ProjectCard key={p.id} project={p} onOpen={openProject} />
+                      ))}
+                    </div>
                   );
-                }
-                return (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {strategic.map((p) => (
-                      <ProjectCard key={p.id} project={p} onOpen={openProject} />
-                    ))}
-                  </div>
-                );
-              })()}
+                })()}
             </div>
 
             <div className="mb-6">
-              <h2 className="text-lg font-serif mb-3" style={{ color: TEXT_LIGHT }}>
-                Operativos
-              </h2>
-              {(() => {
-                const operational = [...projects]
-                  .filter((p) => !p.archived && p.category !== "estrategico")
-                  .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
-                if (operational.length === 0) {
+              <button
+                onClick={() => setOperationalCollapsed((c) => !c)}
+                className="flex items-center gap-2 mb-3"
+              >
+                <h2 className="text-lg font-serif" style={{ color: TEXT_LIGHT }}>
+                  Operativos
+                </h2>
+                {operationalCollapsed ? (
+                  <ChevronRight size={16} style={{ color: TEXT_MUTED }} />
+                ) : (
+                  <ChevronDown size={16} style={{ color: TEXT_MUTED }} />
+                )}
+              </button>
+              {!operationalCollapsed &&
+                (() => {
+                  const operational = [...projects]
+                    .filter((p) => !p.archived && p.category !== "estrategico")
+                    .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+                  if (operational.length === 0) {
+                    return (
+                      <p className="text-sm" style={{ color: TEXT_MUTED }}>
+                        Aún no tienes proyectos operativos.
+                      </p>
+                    );
+                  }
                   return (
-                    <p className="text-sm" style={{ color: TEXT_MUTED }}>
-                      Aún no tienes proyectos operativos.
-                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {operational.map((p) => (
+                        <ProjectCard key={p.id} project={p} onOpen={openProject} />
+                      ))}
+                    </div>
                   );
-                }
-                return (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {operational.map((p) => (
-                      <ProjectCard key={p.id} project={p} onOpen={openProject} />
-                    ))}
-                  </div>
-                );
-              })()}
+                })()}
             </div>
 
             {projects.some((p) => p.archived) && (
