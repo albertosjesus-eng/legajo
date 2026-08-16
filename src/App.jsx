@@ -1482,8 +1482,8 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   const [timelineData, setTimelineData] = useState(null);
   const [loadingTimeline, setLoadingTimeline] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  const [strategicCollapsed, setStrategicCollapsed] = useState(false);
-  const [operationalCollapsed, setOperationalCollapsed] = useState(false);
+  const [strategicCollapsed, setStrategicCollapsed] = useState(true);
+  const [operationalCollapsed, setOperationalCollapsed] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [columnLayout, setColumnLayout] = useState({});
