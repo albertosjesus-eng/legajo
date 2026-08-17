@@ -1156,6 +1156,49 @@ function TimelineView({ projects, timelineData, loading, onOpen }) {
   );
 }
 
+async function loadRecentCaptures(userId) {
+  // Combina lo que este dispositivo tiene aún sin sincronizar (para que se
+  // vea al instante, sin esperar red) con las últimas capturas confirmadas
+  // en la base de datos compartida (para que sea igual en todos los
+  // dispositivos, no solo en el que las escribiste).
+  let localUnsynced = [];
+  try {
+    localUnsynced = await idbGetUnsyncedCaptures();
+  } catch (e) {
+    // IndexedDB no disponible; seguimos solo con lo remoto
+  }
+  const localItems = localUnsynced.map((r) => ({ key: "local-" + r.localId, texto: r.texto, created_at: r.created_at }));
+
+  let remoteItems = [];
+  if (navigator.onLine && userId) {
+    try {
+      const { data, error } = await supabase
+        .from("capturas")
+        .select("id,texto,created_at")
+        .order("created_at", { ascending: false })
+        .limit(5);
+      if (!error) remoteItems = (data || []).map((r) => ({ key: "remote-" + r.id, texto: r.texto, created_at: r.created_at }));
+    } catch (e) {
+      // sin red o fallo puntual; seguimos solo con lo local
+    }
+  }
+
+  const merged = [...localItems, ...remoteItems]
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    .slice(0, 5);
+
+  if (merged.length > 0) return merged;
+
+  // Sin red y sin nada pendiente: mostramos el historial local del propio
+  // dispositivo como último recurso, para no dejar la lista vacía sin motivo.
+  try {
+    const localAll = await idbGetRecentCaptures(5);
+    return localAll.map((r) => ({ key: "local-" + r.localId, texto: r.texto, created_at: r.created_at }));
+  } catch (e) {
+    return [];
+  }
+}
+
 function QuickCapture({ userId, onOpenInbox, pendingCount }) {
   const [text, setText] = useState("");
   const [recent, setRecent] = useState([]);
@@ -1164,11 +1207,21 @@ function QuickCapture({ userId, onOpenInbox, pendingCount }) {
   useEffect(() => {
     const draft = localStorage.getItem("legajo-capture-draft");
     if (draft) setText(draft);
-    idbGetRecentCaptures(5).then(setRecent);
-    syncPendingCaptures(userId).then(() => idbGetRecentCaptures(5).then(setRecent));
-    const onOnline = () => syncPendingCaptures(userId).then(() => idbGetRecentCaptures(5).then(setRecent));
+
+    const refresh = () => loadRecentCaptures(userId).then(setRecent);
+    refresh();
+    syncPendingCaptures(userId).then(refresh);
+
+    const onOnline = () => syncPendingCaptures(userId).then(refresh);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
     window.addEventListener("online", onOnline);
-    return () => window.removeEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1190,9 +1243,9 @@ function QuickCapture({ userId, onOpenInbox, pendingCount }) {
     await idbAddCapture(record);
     setText("");
     localStorage.removeItem("legajo-capture-draft");
-    setRecent((r) => [record, ...r].slice(0, 5));
+    setRecent((r) => [{ key: "local-" + record.localId, texto: record.texto, created_at: record.created_at }, ...r].slice(0, 5));
     textareaRef.current?.focus();
-    syncPendingCaptures(userId);
+    syncPendingCaptures(userId).then(() => loadRecentCaptures(userId).then(setRecent));
   };
 
   const handleKeyDown = (e) => {
@@ -1218,7 +1271,7 @@ function QuickCapture({ userId, onOpenInbox, pendingCount }) {
       <div className="flex items-center justify-between mt-2">
         <div className="flex-1 flex flex-col gap-0.5">
           {recent.map((r) => (
-            <div key={r.localId} className="text-xs truncate" style={{ color: TEXT_MUTED }}>
+            <div key={r.key} className="text-xs truncate" style={{ color: TEXT_MUTED }}>
               {r.texto}
             </div>
           ))}
@@ -1837,6 +1890,15 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     if (connected || calError) {
       window.history.replaceState({}, "", window.location.pathname);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") loadPendingCapturasCount();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
