@@ -125,11 +125,21 @@ async function idbDeleteByRemoteId(remoteId) {
   });
 }
 
+async function idbDeleteByLocalId(localId) {
+  const db = await openCaptureDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).delete(localId);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
 
 async function syncPendingCaptures(userId) {
-  if (!navigator.onLine || !userId) return;
+  if (!navigator.onLine || !userId) return { ok: true };
   try {
     const pending = await idbGetUnsyncedCaptures();
+    let lastError = null;
     for (const record of pending) {
       const { data, error } = await supabase
         .from("capturas")
@@ -138,11 +148,13 @@ async function syncPendingCaptures(userId) {
         .single();
       if (!error && data) {
         await idbMarkCaptureSynced(record.localId, data.id);
+      } else if (error) {
+        lastError = error.message;
       }
     }
+    return lastError ? { ok: false, error: lastError } : { ok: true };
   } catch (e) {
-    // silencioso a propósito: es sincronización de fondo; sin red no debe
-    // interrumpir ni avisar de nada, solo reintentará más tarde
+    return { ok: false, error: String(e) };
   }
 }
 
@@ -1184,7 +1196,13 @@ async function loadRecentCaptures(userId) {
   } catch (e) {
     // IndexedDB no disponible; seguimos solo con lo remoto
   }
-  const localItems = localUnsynced.map((r) => ({ key: "local-" + r.localId, texto: r.texto, created_at: r.created_at }));
+  const localItems = localUnsynced.map((r) => ({
+    key: "local-" + r.localId,
+    texto: r.texto,
+    created_at: r.created_at,
+    localId: r.localId,
+    remoteId: null,
+  }));
 
   let remoteItems = [];
   if (navigator.onLine && userId) {
@@ -1194,7 +1212,14 @@ async function loadRecentCaptures(userId) {
         .select("id,texto,created_at")
         .order("created_at", { ascending: false })
         .limit(5);
-      if (!error) remoteItems = (data || []).map((r) => ({ key: "remote-" + r.id, texto: r.texto, created_at: r.created_at }));
+      if (!error)
+        remoteItems = (data || []).map((r) => ({
+          key: "remote-" + r.id,
+          texto: r.texto,
+          created_at: r.created_at,
+          localId: null,
+          remoteId: r.id,
+        }));
     } catch (e) {
       // sin red o fallo puntual; seguimos solo con lo local
     }
@@ -1210,13 +1235,13 @@ async function loadRecentCaptures(userId) {
   // dispositivo como último recurso, para no dejar la lista vacía sin motivo.
   try {
     const localAll = await idbGetRecentCaptures(5);
-    return localAll.map((r) => ({ key: "local-" + r.localId, texto: r.texto, created_at: r.created_at }));
+    return localAll.map((r) => ({ key: "local-" + r.localId, texto: r.texto, created_at: r.created_at, localId: r.localId, remoteId: r.remote_id || null }));
   } catch (e) {
     return [];
   }
 }
 
-function QuickCapture({ userId, onOpenInbox, pendingCount, refreshTick }) {
+function QuickCapture({ userId, onOpenInbox, pendingCount, refreshTick, onSyncError }) {
   const [text, setText] = useState("");
   const [recent, setRecent] = useState([]);
   const textareaRef = useRef(null);
@@ -1227,9 +1252,16 @@ function QuickCapture({ userId, onOpenInbox, pendingCount, refreshTick }) {
 
     const refresh = () => loadRecentCaptures(userId).then(setRecent);
     refresh();
-    syncPendingCaptures(userId).then(refresh);
+    syncPendingCaptures(userId).then((res) => {
+      if (!res.ok && onSyncError) onSyncError(res.error);
+      refresh();
+    });
 
-    const onOnline = () => syncPendingCaptures(userId).then(refresh);
+    const onOnline = () =>
+      syncPendingCaptures(userId).then((res) => {
+        if (!res.ok && onSyncError) onSyncError(res.error);
+        refresh();
+      });
     const onVisible = () => {
       if (document.visibilityState === "visible") refresh();
     };
@@ -1269,13 +1301,32 @@ function QuickCapture({ userId, onOpenInbox, pendingCount, refreshTick }) {
     await idbAddCapture(record);
     setText("");
     localStorage.removeItem("legajo-capture-draft");
-    setRecent((r) => [{ key: "local-" + record.localId, texto: record.texto, created_at: record.created_at }, ...r].slice(0, 5));
+    setRecent((r) =>
+      [{ key: "local-" + record.localId, texto: record.texto, created_at: record.created_at, localId: record.localId, remoteId: null }, ...r].slice(0, 5)
+    );
     textareaRef.current?.focus();
-    syncPendingCaptures(userId).then(() => loadRecentCaptures(userId).then(setRecent));
+    syncPendingCaptures(userId).then((res) => {
+      if (!res.ok && onSyncError) onSyncError(res.error);
+      loadRecentCaptures(userId).then(setRecent);
+    });
 
     setJustSaved(true);
     clearTimeout(savedTimerRef.current);
     savedTimerRef.current = setTimeout(() => setJustSaved(false), 1600);
+  };
+
+  const removeRecent = async (item) => {
+    setRecent((r) => r.filter((x) => x.key !== item.key));
+    try {
+      if (item.remoteId) {
+        await supabase.from("capturas").delete().eq("id", item.remoteId);
+      }
+      if (item.localId) {
+        await idbDeleteByLocalId(item.localId);
+      }
+    } catch (e) {
+      if (onSyncError) onSyncError(String(e));
+    }
   };
 
   const handleKeyDown = (e) => {
@@ -1311,8 +1362,18 @@ function QuickCapture({ userId, onOpenInbox, pendingCount, refreshTick }) {
       <div className="flex items-center justify-between mt-2">
         <div className="flex-1 flex flex-col gap-0.5">
           {recent.map((r) => (
-            <div key={r.key} className="text-xs truncate" style={{ color: TEXT_MUTED }}>
-              {r.texto}
+            <div key={r.key} className="flex items-center gap-1.5 group">
+              <span className="text-xs truncate flex-1" style={{ color: TEXT_MUTED }}>
+                {r.texto}
+              </span>
+              <button
+                onClick={() => removeRecent(r)}
+                title="Quitar"
+                className="opacity-60 hover:opacity-100 shrink-0"
+                style={{ color: TEXT_MUTED }}
+              >
+                <X size={11} />
+              </button>
             </div>
           ))}
         </div>
@@ -3084,7 +3145,13 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                 </span>
               </button>
             )}
-            <QuickCapture userId={userId} onOpenInbox={openInbox} pendingCount={pendingCapturasCount} refreshTick={captureRefreshTick} />
+            <QuickCapture
+              userId={userId}
+              onOpenInbox={openInbox}
+              pendingCount={pendingCapturasCount}
+              refreshTick={captureRefreshTick}
+              onSyncError={(msg) => setSaveError("No se pudo sincronizar una captura: " + msg)}
+            />
             <HomeSummary
               projects={projects}
               timelineData={timelineData}
