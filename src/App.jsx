@@ -31,6 +31,104 @@ function emptyData() {
   return { notes: [], tasks: [], events: [] };
 }
 
+// ---------- Captura rápida: cola local en IndexedDB (funciona sin conexión) ----------
+const IDB_NAME = "legajo-offline";
+const IDB_STORE = "capturas_queue";
+
+function openCaptureDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        const store = db.createObjectStore(IDB_STORE, { keyPath: "localId" });
+        store.createIndex("created_at", "created_at");
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbAddCapture(record) {
+  const db = await openCaptureDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).put(record);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function idbGetRecentCaptures(limit) {
+  const db = await openCaptureDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readonly");
+    const index = tx.objectStore(IDB_STORE).index("created_at");
+    const results = [];
+    const req = index.openCursor(null, "prev");
+    req.onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (cursor && results.length < limit) {
+        results.push(cursor.value);
+        cursor.continue();
+      } else {
+        resolve(results);
+      }
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbGetUnsyncedCaptures() {
+  const db = await openCaptureDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readonly");
+    const req = tx.objectStore(IDB_STORE).getAll();
+    req.onsuccess = () => resolve((req.result || []).filter((r) => !r.synced));
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbMarkCaptureSynced(localId, remoteId) {
+  const db = await openCaptureDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    const store = tx.objectStore(IDB_STORE);
+    const getReq = store.get(localId);
+    getReq.onsuccess = () => {
+      const record = getReq.result;
+      if (record) {
+        record.synced = true;
+        record.remote_id = remoteId;
+        store.put(record);
+      }
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function syncPendingCaptures(userId) {
+  if (!navigator.onLine || !userId) return;
+  try {
+    const pending = await idbGetUnsyncedCaptures();
+    for (const record of pending) {
+      const { data, error } = await supabase
+        .from("capturas")
+        .insert({ user_id: userId, texto: record.texto, created_at: record.created_at })
+        .select()
+        .single();
+      if (!error && data) {
+        await idbMarkCaptureSynced(record.localId, data.id);
+      }
+    }
+  } catch (e) {
+    // silencioso a propósito: es sincronización de fondo; sin red no debe
+    // interrumpir ni avisar de nada, solo reintentará más tarde
+  }
+}
+
 function downloadFile(content, filename, mime) {
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -1058,6 +1156,83 @@ function TimelineView({ projects, timelineData, loading, onOpen }) {
   );
 }
 
+function QuickCapture({ userId, onOpenInbox, pendingCount }) {
+  const [text, setText] = useState("");
+  const [recent, setRecent] = useState([]);
+  const textareaRef = useRef(null);
+
+  useEffect(() => {
+    const draft = localStorage.getItem("legajo-capture-draft");
+    if (draft) setText(draft);
+    idbGetRecentCaptures(5).then(setRecent);
+    syncPendingCaptures(userId).then(() => idbGetRecentCaptures(5).then(setRecent));
+    const onOnline = () => syncPendingCaptures(userId).then(() => idbGetRecentCaptures(5).then(setRecent));
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleChange = (e) => {
+    const value = e.target.value;
+    setText(value);
+    localStorage.setItem("legajo-capture-draft", value);
+  };
+
+  const submit = async () => {
+    const value = text.trim();
+    if (!value) return;
+    const record = {
+      localId: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()),
+      texto: value,
+      created_at: new Date().toISOString(),
+      synced: false,
+    };
+    await idbAddCapture(record);
+    setText("");
+    localStorage.removeItem("legajo-capture-draft");
+    setRecent((r) => [record, ...r].slice(0, 5));
+    textareaRef.current?.focus();
+    syncPendingCaptures(userId);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      submit();
+    }
+  };
+
+  return (
+    <div className="mb-6">
+      <textarea
+        ref={textareaRef}
+        autoFocus
+        value={text}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        placeholder="Anota algo y pulsa Intro..."
+        rows={2}
+        className="w-full px-4 py-3 rounded-lg text-base outline-none resize-none"
+        style={{ background: SURFACE2, color: TEXT_LIGHT }}
+      />
+      <div className="flex items-center justify-between mt-2">
+        <div className="flex-1 flex flex-col gap-0.5">
+          {recent.map((r) => (
+            <div key={r.localId} className="text-xs truncate" style={{ color: TEXT_MUTED }}>
+              {r.texto}
+            </div>
+          ))}
+        </div>
+        {pendingCount > 0 && (
+          <button onClick={onOpenInbox} className="text-xs shrink-0 ml-3" style={{ color: "#e0b84a" }}>
+            {pendingCount} sin clasificar →
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function HomeSummary({ projects, timelineData, onOpenTimeline }) {
   if (!timelineData) return null;
   const projectById = Object.fromEntries(projects.filter((p) => !p.archived).map((p) => [p.id, p]));
@@ -1319,6 +1494,134 @@ function MilestonesTimeline({ projects, timelineData, onOpen }) {
   );
 }
 
+function CapturaRow({ captura, projects, onProcess, onDiscard }) {
+  const [mode, setMode] = useState(null); // null | "nota" | "tarea" | "cita"
+  const [projectId, setProjectId] = useState(projects[0]?.id || "");
+  const [dueDate, setDueDate] = useState("");
+  const [eventDate, setEventDate] = useState(todayISO());
+  const [eventTime, setEventTime] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const confirm = async () => {
+    if (!projectId) return;
+    setSaving(true);
+    await onProcess(captura, mode, projectId, { dueDate, eventDate, eventTime });
+    setSaving(false);
+  };
+
+  if (mode) {
+    return (
+      <div className="p-3 rounded-md flex flex-col gap-2" style={{ background: SURFACE2 }}>
+        <div className="text-sm" style={{ color: TEXT_LIGHT }}>
+          {captura.texto}
+        </div>
+        <select
+          value={projectId}
+          onChange={(e) => setProjectId(e.target.value)}
+          className="px-2 py-1.5 rounded text-sm outline-none"
+          style={{ background: PAPER, color: INK_ON_PAPER }}
+        >
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        {mode === "tarea" && (
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            placeholder="Fecha límite (opcional)"
+            className="px-2 py-1.5 rounded text-sm outline-none self-start"
+            style={{ background: PAPER, color: INK_ON_PAPER }}
+          />
+        )}
+        {mode === "cita" && (
+          <div className="flex gap-2">
+            <input
+              type="date"
+              value={eventDate}
+              onChange={(e) => setEventDate(e.target.value)}
+              className="px-2 py-1.5 rounded text-sm outline-none"
+              style={{ background: PAPER, color: INK_ON_PAPER }}
+            />
+            <input
+              type="time"
+              value={eventTime}
+              onChange={(e) => setEventTime(e.target.value)}
+              className="px-2 py-1.5 rounded text-sm outline-none"
+              style={{ background: PAPER, color: INK_ON_PAPER }}
+            />
+          </div>
+        )}
+        <div className="flex gap-2 justify-end">
+          <button onClick={() => setMode(null)} className="text-xs px-2 py-1" style={{ color: TEXT_MUTED }}>
+            Cancelar
+          </button>
+          <button
+            onClick={confirm}
+            disabled={saving || !projectId}
+            className="text-xs px-3 py-1.5 rounded"
+            style={{ background: "#C9992F", color: "#fff", opacity: saving ? 0.7 : 1 }}
+          >
+            {saving ? "Guardando..." : "Confirmar"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-3 rounded-md flex items-center justify-between gap-3" style={{ background: SURFACE2 }}>
+      <span className="text-sm flex-1 min-w-0 truncate" style={{ color: TEXT_LIGHT }}>
+        {captura.texto}
+      </span>
+      <div className="flex items-center gap-2 shrink-0">
+        <button onClick={() => setMode("nota")} title="Convertir en nota" className="text-xs px-2 py-1 rounded" style={{ color: TEXT_MUTED, background: "rgba(255,255,255,0.06)" }}>
+          Nota
+        </button>
+        <button onClick={() => setMode("tarea")} title="Convertir en tarea" className="text-xs px-2 py-1 rounded" style={{ color: TEXT_MUTED, background: "rgba(255,255,255,0.06)" }}>
+          Tarea
+        </button>
+        <button onClick={() => setMode("cita")} title="Convertir en cita" className="text-xs px-2 py-1 rounded" style={{ color: TEXT_MUTED, background: "rgba(255,255,255,0.06)" }}>
+          Cita
+        </button>
+        <button onClick={() => onDiscard(captura.id)} title="Descartar" style={{ color: TEXT_MUTED }}>
+          <X size={15} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function BandejaView({ projects, capturas, loading, onProcess, onDiscard }) {
+  const activeProjects = projects.filter((p) => !p.archived);
+  return (
+    <div>
+      {loading ? (
+        <div className="flex items-center gap-2 py-16 justify-center" style={{ color: TEXT_MUTED }}>
+          <Loader2 size={18} className="animate-spin" /> Cargando bandeja...
+        </div>
+      ) : capturas.length === 0 ? (
+        <p className="text-sm text-center py-10" style={{ color: TEXT_MUTED }}>
+          Bandeja vacía — no hay nada por clasificar.
+        </p>
+      ) : activeProjects.length === 0 ? (
+        <p className="text-sm text-center py-10" style={{ color: TEXT_MUTED }}>
+          Necesitas al menos un proyecto activo para poder clasificar capturas.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {capturas.map((c) => (
+            <CapturaRow key={c.id} captura={c} projects={activeProjects} onProcess={onProcess} onDiscard={onDiscard} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SearchView({ projects, timelineData, loading, onOpen }) {
   const [query, setQuery] = useState("");
 
@@ -1482,6 +1785,9 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   const [timelineData, setTimelineData] = useState(null);
   const [loadingTimeline, setLoadingTimeline] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [inboxCapturas, setInboxCapturas] = useState([]);
+  const [loadingInbox, setLoadingInbox] = useState(false);
+  const [pendingCapturasCount, setPendingCapturasCount] = useState(0);
   const [strategicCollapsed, setStrategicCollapsed] = useState(true);
   const [operationalCollapsed, setOperationalCollapsed] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -1512,6 +1818,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     loadProjects();
     checkCalendarStatus();
     loadTimeline();
+    loadPendingCapturasCount();
 
     // Si venimos de vuelta de Google, mostramos aviso y limpiamos la URL
     const params = new URLSearchParams(window.location.search);
@@ -1742,6 +2049,74 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   function openFromTimeline(id) {
     setActiveId(id);
     setView("project");
+  }
+
+  async function loadPendingCapturasCount() {
+    const { count, error } = await supabase
+      .from("capturas")
+      .select("id", { count: "exact", head: true })
+      .eq("estado", "pendiente");
+    if (!error) setPendingCapturasCount(count || 0);
+  }
+
+  async function loadInbox() {
+    setLoadingInbox(true);
+    const { data, error } = await supabase
+      .from("capturas")
+      .select("*")
+      .eq("estado", "pendiente")
+      .order("created_at", { ascending: true });
+    if (error) {
+      setSaveError("No se pudo cargar la bandeja: " + error.message);
+    } else {
+      setInboxCapturas(data || []);
+    }
+    setLoadingInbox(false);
+  }
+
+  async function openInbox() {
+    setView("bandeja");
+    loadInbox();
+  }
+
+  async function processCaptura(captura, mode, projectId, extra) {
+    try {
+      if (mode === "nota") {
+        const { error } = await supabase
+          .from("notes")
+          .insert({ project_id: projectId, user_id: userId, title: "", body: captura.texto });
+        if (error) throw error;
+      } else if (mode === "tarea") {
+        const { error } = await supabase
+          .from("tasks")
+          .insert({ project_id: projectId, user_id: userId, text: captura.texto, due_date: extra.dueDate || null });
+        if (error) throw error;
+      } else if (mode === "cita") {
+        const { error } = await supabase
+          .from("events")
+          .insert({ project_id: projectId, user_id: userId, title: captura.texto, date: extra.eventDate, time: extra.eventTime || null });
+        if (error) throw error;
+      }
+      const { error: updError } = await supabase
+        .from("capturas")
+        .update({ estado: "procesada", project_id: projectId, procesada_at: new Date().toISOString() })
+        .eq("id", captura.id);
+      if (updError) throw updError;
+      setInboxCapturas((c) => c.filter((x) => x.id !== captura.id));
+      setPendingCapturasCount((n) => Math.max(0, n - 1));
+    } catch (e) {
+      setSaveError("No se pudo procesar la captura: " + (e?.message || String(e)));
+    }
+  }
+
+  async function discardCaptura(id) {
+    const { error } = await supabase.from("capturas").update({ estado: "cerrada" }).eq("id", id);
+    if (error) {
+      setSaveError("No se pudo descartar la captura: " + error.message);
+      return;
+    }
+    setInboxCapturas((c) => c.filter((x) => x.id !== id));
+    setPendingCapturasCount((n) => Math.max(0, n - 1));
   }
 
   async function exportAll() {
@@ -2461,6 +2836,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                 </span>
               </button>
             )}
+            <QuickCapture userId={userId} onOpenInbox={openInbox} pendingCount={pendingCapturasCount} />
             <HomeSummary
               projects={projects}
               timelineData={timelineData}
@@ -2597,6 +2973,26 @@ function LegajoApp({ userId, userEmail, onLogout }) {
               <ChevronLeft size={14} /> Inicio
             </button>
             <SearchView projects={projects} timelineData={timelineData} loading={loadingTimeline} onOpen={openFromTimeline} />
+          </div>
+        ) : view === "bandeja" ? (
+          <div>
+            <button
+              onClick={() => setView("home")}
+              className="flex items-center gap-1 text-xs mb-4"
+              style={{ color: TEXT_MUTED }}
+            >
+              <ChevronLeft size={14} /> Inicio
+            </button>
+            <h2 className="text-lg font-serif mb-4" style={{ color: TEXT_LIGHT }}>
+              Bandeja de capturas
+            </h2>
+            <BandejaView
+              projects={projects}
+              capturas={inboxCapturas}
+              loading={loadingInbox}
+              onProcess={processCaptura}
+              onDiscard={discardCaptura}
+            />
           </div>
         ) : (
           active && (
