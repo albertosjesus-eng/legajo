@@ -109,6 +109,23 @@ async function idbMarkCaptureSynced(localId, remoteId) {
   });
 }
 
+async function idbDeleteByRemoteId(remoteId) {
+  const db = await openCaptureDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    const store = tx.objectStore(IDB_STORE);
+    const req = store.getAll();
+    req.onsuccess = () => {
+      (req.result || []).forEach((r) => {
+        if (r.remote_id === remoteId) store.delete(r.localId);
+      });
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+
 async function syncPendingCaptures(userId) {
   if (!navigator.onLine || !userId) return;
   try {
@@ -1199,7 +1216,7 @@ async function loadRecentCaptures(userId) {
   }
 }
 
-function QuickCapture({ userId, onOpenInbox, pendingCount }) {
+function QuickCapture({ userId, onOpenInbox, pendingCount, refreshTick }) {
   const [text, setText] = useState("");
   const [recent, setRecent] = useState([]);
   const textareaRef = useRef(null);
@@ -1224,6 +1241,12 @@ function QuickCapture({ userId, onOpenInbox, pendingCount }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (refreshTick === 0) return; // ya se ha cargado en el efecto anterior al montar
+    loadRecentCaptures(userId).then(setRecent);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshTick]);
 
   const [justSaved, setJustSaved] = useState(false);
   const savedTimerRef = useRef(null);
@@ -1966,6 +1989,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   const [loadingInbox, setLoadingInbox] = useState(false);
   const [inboxShowAll, setInboxShowAll] = useState(false);
   const [pendingCapturasCount, setPendingCapturasCount] = useState(0);
+  const [captureRefreshTick, setCaptureRefreshTick] = useState(0);
   const [strategicCollapsed, setStrategicCollapsed] = useState(true);
   const [operationalCollapsed, setOperationalCollapsed] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -2300,6 +2324,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
         setInboxCapturas((c) => c.filter((x) => x.id !== captura.id));
       }
       setPendingCapturasCount((n) => Math.max(0, n - 1));
+      setCaptureRefreshTick((t) => t + 1);
     } catch (e) {
       setSaveError("No se pudo procesar la captura: " + (e?.message || String(e)));
     }
@@ -2317,6 +2342,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
       setInboxCapturas((c) => c.filter((x) => x.id !== id));
     }
     setPendingCapturasCount((n) => Math.max(0, n - 1));
+    setCaptureRefreshTick((t) => t + 1);
   }
 
   async function editCapturaText(id, texto) {
@@ -2335,8 +2361,10 @@ function LegajoApp({ userId, userEmail, onLogout }) {
       setSaveError("No se pudo eliminar la captura: " + error.message);
       return;
     }
+    idbDeleteByRemoteId(id).catch(() => {});
     setInboxCapturas((c) => c.filter((x) => x.id !== id));
     if (wasPending) setPendingCapturasCount((n) => Math.max(0, n - 1));
+    setCaptureRefreshTick((t) => t + 1);
   }
 
   async function exportAll() {
@@ -3056,7 +3084,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                 </span>
               </button>
             )}
-            <QuickCapture userId={userId} onOpenInbox={openInbox} pendingCount={pendingCapturasCount} />
+            <QuickCapture userId={userId} onOpenInbox={openInbox} pendingCount={pendingCapturasCount} refreshTick={captureRefreshTick} />
             <HomeSummary
               projects={projects}
               timelineData={timelineData}
