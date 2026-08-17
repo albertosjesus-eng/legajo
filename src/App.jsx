@@ -1293,11 +1293,9 @@ function QuickCapture({ userId, onOpenInbox, pendingCount }) {
             </div>
           ))}
         </div>
-        {pendingCount > 0 && (
-          <button onClick={onOpenInbox} className="text-xs shrink-0 ml-3" style={{ color: "#e0b84a" }}>
-            {pendingCount} sin clasificar →
-          </button>
-        )}
+        <button onClick={onOpenInbox} className="text-xs shrink-0 ml-3" style={{ color: pendingCount > 0 ? "#e0b84a" : TEXT_MUTED }}>
+          {pendingCount > 0 ? `${pendingCount} sin clasificar →` : "Ver capturas →"}
+        </button>
       </div>
     </div>
   );
@@ -2268,8 +2266,9 @@ function LegajoApp({ userId, userEmail, onLogout }) {
 
   async function openInbox() {
     setView("bandeja");
-    setInboxShowAll(false);
-    loadInbox(false);
+    const showAll = pendingCapturasCount === 0;
+    setInboxShowAll(showAll);
+    loadInbox(showAll);
   }
 
   async function processCaptura(captura, mode, projectId, extra) {
