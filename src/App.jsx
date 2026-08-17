@@ -1225,6 +1225,9 @@ function QuickCapture({ userId, onOpenInbox, pendingCount }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const [justSaved, setJustSaved] = useState(false);
+  const savedTimerRef = useRef(null);
+
   const handleChange = (e) => {
     const value = e.target.value;
     setText(value);
@@ -1246,6 +1249,10 @@ function QuickCapture({ userId, onOpenInbox, pendingCount }) {
     setRecent((r) => [{ key: "local-" + record.localId, texto: record.texto, created_at: record.created_at }, ...r].slice(0, 5));
     textareaRef.current?.focus();
     syncPendingCaptures(userId).then(() => loadRecentCaptures(userId).then(setRecent));
+
+    setJustSaved(true);
+    clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = setTimeout(() => setJustSaved(false), 1600);
   };
 
   const handleKeyDown = (e) => {
@@ -1257,17 +1264,27 @@ function QuickCapture({ userId, onOpenInbox, pendingCount }) {
 
   return (
     <div className="mb-6">
-      <textarea
-        ref={textareaRef}
-        autoFocus
-        value={text}
-        onChange={handleChange}
-        onKeyDown={handleKeyDown}
-        placeholder="Anota algo y pulsa Intro..."
-        rows={2}
-        className="w-full px-4 py-3 rounded-lg text-base outline-none resize-none"
-        style={{ background: SURFACE2, color: TEXT_LIGHT }}
-      />
+      <div className="relative">
+        <textarea
+          ref={textareaRef}
+          autoFocus
+          value={text}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          placeholder="Anota algo y pulsa Intro..."
+          rows={2}
+          className="w-full px-4 py-3 rounded-lg text-base outline-none resize-none"
+          style={{ background: SURFACE2, color: TEXT_LIGHT }}
+        />
+        {justSaved && (
+          <span
+            className="absolute top-2 right-3 text-xs px-2 py-1 rounded"
+            style={{ background: "#2f3d2a", color: "#dcead4" }}
+          >
+            Guardado ✓
+          </span>
+        )}
+      </div>
       <div className="flex items-center justify-between mt-2">
         <div className="flex-1 flex flex-col gap-0.5">
           {recent.map((r) => (
