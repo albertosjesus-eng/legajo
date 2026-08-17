@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Plus, X, Trash2, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, FileText, CalendarDays,
   CheckSquare, Square, Loader2, FolderOpen, LogOut, Link2, Unlink2, CalendarCheck,
-  Sparkles, Send, Pencil, History, Archive, ArchiveRestore, Search, Download, PenTool, Clock, Menu, MoveHorizontal
+  Sparkles, Send, Pencil, History, Archive, ArchiveRestore, Search, Download, PenTool, Clock, Menu, MoveHorizontal, ClipboardCopy
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import Login from "./Login";
@@ -1564,13 +1564,16 @@ function MilestonesTimeline({ projects, timelineData, onOpen }) {
   );
 }
 
-function CapturaRow({ captura, projects, onProcess, onDiscard }) {
-  const [mode, setMode] = useState(null); // null | "nota" | "tarea" | "cita"
+function CapturaRow({ captura, projects, onProcess, onDiscard, onEdit, onDelete, showState }) {
+  const [mode, setMode] = useState(null); // null | "nota" | "tarea" | "cita" | "editar"
   const [projectId, setProjectId] = useState(projects[0]?.id || "");
   const [dueDate, setDueDate] = useState("");
   const [eventDate, setEventDate] = useState(todayISO());
   const [eventTime, setEventTime] = useState("");
+  const [editText, setEditText] = useState(captura.texto);
   const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const confirm = async () => {
     if (!projectId) return;
@@ -1578,6 +1581,54 @@ function CapturaRow({ captura, projects, onProcess, onDiscard }) {
     await onProcess(captura, mode, projectId, { dueDate, eventDate, eventTime });
     setSaving(false);
   };
+
+  const saveEdit = async () => {
+    if (!editText.trim()) return;
+    setSaving(true);
+    await onEdit(captura.id, editText.trim());
+    setSaving(false);
+    setMode(null);
+  };
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(captura.texto);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch (e) {
+      // si el navegador no permite portapapeles, no pasa nada grave
+    }
+  };
+
+  const STATE_LABEL = { pendiente: "pendiente", procesada: "procesada", cerrada: "descartada" };
+
+  if (mode === "editar") {
+    return (
+      <div className="p-3 rounded-md flex flex-col gap-2" style={{ background: SURFACE2 }}>
+        <textarea
+          autoFocus
+          value={editText}
+          onChange={(e) => setEditText(e.target.value)}
+          rows={2}
+          className="px-2 py-1.5 rounded text-sm outline-none resize-none"
+          style={{ background: PAPER, color: INK_ON_PAPER }}
+        />
+        <div className="flex gap-2 justify-end">
+          <button onClick={() => setMode(null)} className="text-xs px-2 py-1" style={{ color: TEXT_MUTED }}>
+            Cancelar
+          </button>
+          <button
+            onClick={saveEdit}
+            disabled={saving}
+            className="text-xs px-3 py-1.5 rounded"
+            style={{ background: "#C9992F", color: "#fff", opacity: saving ? 0.7 : 1 }}
+          >
+            {saving ? "Guardando..." : "Guardar"}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (mode) {
     return (
@@ -1644,47 +1695,105 @@ function CapturaRow({ captura, projects, onProcess, onDiscard }) {
 
   return (
     <div className="p-3 rounded-md flex items-center justify-between gap-3" style={{ background: SURFACE2 }}>
-      <span className="text-sm flex-1 min-w-0 truncate" style={{ color: TEXT_LIGHT }}>
-        {captura.texto}
-      </span>
+      <div className="flex-1 min-w-0">
+        <span className="text-sm truncate block" style={{ color: TEXT_LIGHT }}>
+          {captura.texto}
+        </span>
+        {showState && (
+          <span className="text-[10px] uppercase tracking-wide" style={{ color: TEXT_MUTED }}>
+            {STATE_LABEL[captura.estado] || captura.estado}
+          </span>
+        )}
+      </div>
       <div className="flex items-center gap-2 shrink-0">
-        <button onClick={() => setMode("nota")} title="Convertir en nota" className="text-xs px-2 py-1 rounded" style={{ color: TEXT_MUTED, background: "rgba(255,255,255,0.06)" }}>
-          Nota
+        {captura.estado === "pendiente" && (
+          <>
+            <button onClick={() => setMode("nota")} title="Convertir en nota" className="text-xs px-2 py-1 rounded" style={{ color: TEXT_MUTED, background: "rgba(255,255,255,0.06)" }}>
+              Nota
+            </button>
+            <button onClick={() => setMode("tarea")} title="Convertir en tarea" className="text-xs px-2 py-1 rounded" style={{ color: TEXT_MUTED, background: "rgba(255,255,255,0.06)" }}>
+              Tarea
+            </button>
+            <button onClick={() => setMode("cita")} title="Convertir en cita" className="text-xs px-2 py-1 rounded" style={{ color: TEXT_MUTED, background: "rgba(255,255,255,0.06)" }}>
+              Cita
+            </button>
+          </>
+        )}
+        <button onClick={copy} title="Copiar texto" style={{ color: copied ? "#8fae7c" : TEXT_MUTED }}>
+          {copied ? <CheckSquare size={15} /> : <ClipboardCopy size={15} />}
         </button>
-        <button onClick={() => setMode("tarea")} title="Convertir en tarea" className="text-xs px-2 py-1 rounded" style={{ color: TEXT_MUTED, background: "rgba(255,255,255,0.06)" }}>
-          Tarea
+        <button onClick={() => setMode("editar")} title="Editar texto" style={{ color: TEXT_MUTED }}>
+          <Pencil size={14} />
         </button>
-        <button onClick={() => setMode("cita")} title="Convertir en cita" className="text-xs px-2 py-1 rounded" style={{ color: TEXT_MUTED, background: "rgba(255,255,255,0.06)" }}>
-          Cita
-        </button>
-        <button onClick={() => onDiscard(captura.id)} title="Descartar" style={{ color: TEXT_MUTED }}>
-          <X size={15} />
-        </button>
+        {captura.estado === "pendiente" && (
+          <button onClick={() => onDiscard(captura.id)} title="Descartar" style={{ color: TEXT_MUTED }}>
+            <X size={15} />
+          </button>
+        )}
+        {!confirmDelete ? (
+          <button onClick={() => setConfirmDelete(true)} title="Eliminar definitivamente" style={{ color: TEXT_MUTED }}>
+            <Trash2 size={14} />
+          </button>
+        ) : (
+          <span className="flex items-center gap-1 text-xs">
+            <button onClick={() => onDelete(captura.id)} className="px-1.5 py-0.5 rounded" style={{ background: "#8a3b2a", color: "#fff" }}>
+              Sí
+            </button>
+            <button onClick={() => setConfirmDelete(false)} style={{ color: TEXT_MUTED }}>
+              No
+            </button>
+          </span>
+        )}
       </div>
     </div>
   );
 }
 
-function BandejaView({ projects, capturas, loading, onProcess, onDiscard }) {
+function BandejaView({ projects, capturas, loading, onProcess, onDiscard, onEdit, onDelete, showAll, onToggleShowAll }) {
   const activeProjects = projects.filter((p) => !p.archived);
   return (
     <div>
+      <div className="flex items-center gap-2 mb-4">
+        <button
+          onClick={() => onToggleShowAll(false)}
+          className="text-xs px-3 py-1.5 rounded-md"
+          style={{ background: !showAll ? TEXT_LIGHT : "transparent", color: !showAll ? INK : TEXT_MUTED, border: `1px solid ${!showAll ? TEXT_LIGHT : "rgba(255,255,255,0.2)"}` }}
+        >
+          Pendientes
+        </button>
+        <button
+          onClick={() => onToggleShowAll(true)}
+          className="text-xs px-3 py-1.5 rounded-md"
+          style={{ background: showAll ? TEXT_LIGHT : "transparent", color: showAll ? INK : TEXT_MUTED, border: `1px solid ${showAll ? TEXT_LIGHT : "rgba(255,255,255,0.2)"}` }}
+        >
+          Todo el historial
+        </button>
+      </div>
       {loading ? (
         <div className="flex items-center gap-2 py-16 justify-center" style={{ color: TEXT_MUTED }}>
           <Loader2 size={18} className="animate-spin" /> Cargando bandeja...
         </div>
       ) : capturas.length === 0 ? (
         <p className="text-sm text-center py-10" style={{ color: TEXT_MUTED }}>
-          Bandeja vacía — no hay nada por clasificar.
+          {showAll ? "Todavía no has capturado nada." : "Bandeja vacía — no hay nada por clasificar."}
         </p>
-      ) : activeProjects.length === 0 ? (
+      ) : !showAll && activeProjects.length === 0 ? (
         <p className="text-sm text-center py-10" style={{ color: TEXT_MUTED }}>
           Necesitas al menos un proyecto activo para poder clasificar capturas.
         </p>
       ) : (
         <div className="flex flex-col gap-2">
           {capturas.map((c) => (
-            <CapturaRow key={c.id} captura={c} projects={activeProjects} onProcess={onProcess} onDiscard={onDiscard} />
+            <CapturaRow
+              key={c.id}
+              captura={c}
+              projects={activeProjects}
+              onProcess={onProcess}
+              onDiscard={onDiscard}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              showState={showAll}
+            />
           ))}
         </div>
       )}
@@ -1857,6 +1966,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   const [showArchived, setShowArchived] = useState(false);
   const [inboxCapturas, setInboxCapturas] = useState([]);
   const [loadingInbox, setLoadingInbox] = useState(false);
+  const [inboxShowAll, setInboxShowAll] = useState(false);
   const [pendingCapturasCount, setPendingCapturasCount] = useState(0);
   const [strategicCollapsed, setStrategicCollapsed] = useState(true);
   const [operationalCollapsed, setOperationalCollapsed] = useState(true);
@@ -2138,13 +2248,11 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     if (!error) setPendingCapturasCount(count || 0);
   }
 
-  async function loadInbox() {
+  async function loadInbox(showAll) {
     setLoadingInbox(true);
-    const { data, error } = await supabase
-      .from("capturas")
-      .select("*")
-      .eq("estado", "pendiente")
-      .order("created_at", { ascending: true });
+    let query = supabase.from("capturas").select("*");
+    query = showAll ? query.order("created_at", { ascending: false }) : query.eq("estado", "pendiente").order("created_at", { ascending: true });
+    const { data, error } = await query;
     if (error) {
       setSaveError("No se pudo cargar la bandeja: " + error.message);
     } else {
@@ -2153,9 +2261,15 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     setLoadingInbox(false);
   }
 
+  function toggleInboxShowAll(showAll) {
+    setInboxShowAll(showAll);
+    loadInbox(showAll);
+  }
+
   async function openInbox() {
     setView("bandeja");
-    loadInbox();
+    setInboxShowAll(false);
+    loadInbox(false);
   }
 
   async function processCaptura(captura, mode, projectId, extra) {
@@ -2181,7 +2295,11 @@ function LegajoApp({ userId, userEmail, onLogout }) {
         .update({ estado: "procesada", project_id: projectId, procesada_at: new Date().toISOString() })
         .eq("id", captura.id);
       if (updError) throw updError;
-      setInboxCapturas((c) => c.filter((x) => x.id !== captura.id));
+      if (inboxShowAll) {
+        setInboxCapturas((c) => c.map((x) => (x.id === captura.id ? { ...x, estado: "procesada", project_id: projectId } : x)));
+      } else {
+        setInboxCapturas((c) => c.filter((x) => x.id !== captura.id));
+      }
       setPendingCapturasCount((n) => Math.max(0, n - 1));
     } catch (e) {
       setSaveError("No se pudo procesar la captura: " + (e?.message || String(e)));
@@ -2194,8 +2312,32 @@ function LegajoApp({ userId, userEmail, onLogout }) {
       setSaveError("No se pudo descartar la captura: " + error.message);
       return;
     }
-    setInboxCapturas((c) => c.filter((x) => x.id !== id));
+    if (inboxShowAll) {
+      setInboxCapturas((c) => c.map((x) => (x.id === id ? { ...x, estado: "cerrada" } : x)));
+    } else {
+      setInboxCapturas((c) => c.filter((x) => x.id !== id));
+    }
     setPendingCapturasCount((n) => Math.max(0, n - 1));
+  }
+
+  async function editCapturaText(id, texto) {
+    const { error } = await supabase.from("capturas").update({ texto }).eq("id", id);
+    if (error) {
+      setSaveError("No se pudo editar la captura: " + error.message);
+      return;
+    }
+    setInboxCapturas((c) => c.map((x) => (x.id === id ? { ...x, texto } : x)));
+  }
+
+  async function deleteCapturaHard(id) {
+    const wasPending = inboxCapturas.find((x) => x.id === id)?.estado === "pendiente";
+    const { error } = await supabase.from("capturas").delete().eq("id", id);
+    if (error) {
+      setSaveError("No se pudo eliminar la captura: " + error.message);
+      return;
+    }
+    setInboxCapturas((c) => c.filter((x) => x.id !== id));
+    if (wasPending) setPendingCapturasCount((n) => Math.max(0, n - 1));
   }
 
   async function exportAll() {
@@ -3071,6 +3213,10 @@ function LegajoApp({ userId, userEmail, onLogout }) {
               loading={loadingInbox}
               onProcess={processCaptura}
               onDiscard={discardCaptura}
+              onEdit={editCapturaText}
+              onDelete={deleteCapturaHard}
+              showAll={inboxShowAll}
+              onToggleShowAll={toggleInboxShowAll}
             />
           </div>
         ) : (
