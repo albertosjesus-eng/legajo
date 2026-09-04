@@ -28,7 +28,7 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 function emptyData() {
-  return { notes: [], tasks: [], events: [] };
+  return { notes: [], tasks: [], events: [], links: [] };
 }
 
 // ---------- Captura rápida: cola local en IndexedDB (funciona sin conexión) ----------
@@ -929,6 +929,127 @@ function AgendaPanel({ events, onAdd, onDelete, onUpdate, color }) {
   );
 }
 
+
+function LinkRow({ link, onUpdate, onDelete, color }) {
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(link.title || "");
+  const [url, setUrl] = useState(link.url);
+
+  const save = async () => {
+    if (!url.trim()) return;
+    const ok = await onUpdate(link.id, { title: title.trim() || null, url: url.trim() });
+    if (ok) setEditing(false);
+  };
+
+  let hostname = link.url;
+  try {
+    hostname = new URL(link.url).hostname.replace(/^www\./, "");
+  } catch (e) {
+    // url sin protocolo o malformada; mostramos tal cual
+  }
+
+  if (editing) {
+    return (
+      <div className="flex flex-col gap-1.5 p-2 rounded-md" style={{ background: SURFACE2 }}>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Título (opcional)"
+          className="px-2 py-1.5 rounded text-sm outline-none"
+          style={{ background: PAPER, color: INK_ON_PAPER }}
+        />
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && save()}
+          className="px-2 py-1.5 rounded text-sm outline-none"
+          style={{ background: PAPER, color: INK_ON_PAPER }}
+        />
+        <div className="flex gap-2 justify-end">
+          <button onClick={() => setEditing(false)} className="text-xs px-2 py-1" style={{ color: TEXT_MUTED }}>
+            Cancelar
+          </button>
+          <button onClick={save} className="text-xs px-3 py-1 rounded" style={{ background: color, color: "#fff" }}>
+            Guardar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 p-2 rounded-md group" style={{ background: SURFACE2 }}>
+      <Link2 size={14} className="shrink-0" style={{ color }} />
+      <a
+        href={link.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex-1 min-w-0 text-sm truncate hover:underline"
+        style={{ color: TEXT_LIGHT }}
+        title={link.url}
+      >
+        {link.title || hostname}
+      </a>
+      <button onClick={() => setEditing(true)} className="opacity-70 hover:opacity-100 shrink-0" style={{ color: TEXT_MUTED }}>
+        <Pencil size={13} />
+      </button>
+      <button onClick={() => onDelete(link.id)} className="opacity-70 hover:opacity-100 shrink-0" style={{ color: TEXT_MUTED }}>
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
+function LinksPanel({ links, onAdd, onUpdate, onDelete, color }) {
+  const [title, setTitle] = useState("");
+  const [url, setUrl] = useState("");
+
+  const submit = async () => {
+    if (!url.trim()) return;
+    let normalized = url.trim();
+    if (!/^https?:\/\//i.test(normalized)) normalized = "https://" + normalized;
+    const ok = await onAdd(title.trim(), normalized);
+    if (ok) {
+      setTitle("");
+      setUrl("");
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex flex-col sm:flex-row gap-2 mb-3">
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Título (opcional)"
+          className="px-3 py-2 rounded-md text-sm outline-none sm:w-48"
+          style={{ background: PAPER, color: INK_ON_PAPER }}
+        />
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          placeholder="Pega o escribe la URL..."
+          className="flex-1 px-3 py-2 rounded-md text-sm outline-none min-w-0"
+          style={{ background: PAPER, color: INK_ON_PAPER }}
+        />
+        <button onClick={submit} className="px-3 rounded-md shrink-0" style={{ background: color, color: "#fff" }}>
+          <Plus size={16} />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto flex flex-col gap-1.5 pr-1">
+        {links.length === 0 && (
+          <p className="text-sm" style={{ color: TEXT_MUTED }}>
+            Sin enlaces todavía.
+          </p>
+        )}
+        {links.map((l) => (
+          <LinkRow key={l.id} link={l} onUpdate={onUpdate} onDelete={onDelete} color={color} />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function AskClaudePanel({ projectId, color, onCreated }) {
   const [question, setQuestion] = useState("");
@@ -2189,15 +2310,16 @@ function LegajoApp({ userId, userEmail, onLogout }) {
 
   async function loadProjectData(id) {
     setLoadingProject(true);
-    const [notesRes, tasksRes, eventsRes] = await Promise.all([
+    const [notesRes, tasksRes, eventsRes, linksRes] = await Promise.all([
       supabase.from("notes").select("*").eq("project_id", id),
       supabase.from("tasks").select("*").eq("project_id", id),
       supabase.from("events").select("*").eq("project_id", id),
+      supabase.from("links").select("*").eq("project_id", id).order("created_at", { ascending: false }),
     ]);
-    if (notesRes.error || tasksRes.error || eventsRes.error) {
+    if (notesRes.error || tasksRes.error || eventsRes.error || linksRes.error) {
       setSaveError(
         "No se pudo cargar el proyecto por completo: " +
-          [notesRes.error?.message, tasksRes.error?.message, eventsRes.error?.message].filter(Boolean).join(" / ")
+          [notesRes.error?.message, tasksRes.error?.message, eventsRes.error?.message, linksRes.error?.message].filter(Boolean).join(" / ")
       );
     }
     setProjectData((pd) => ({
@@ -2206,6 +2328,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
         notes: notesRes.data || [],
         tasks: tasksRes.data || [],
         events: eventsRes.data || [],
+        links: linksRes.data || [],
       },
     }));
     setLoadingProject(false);
@@ -2701,6 +2824,43 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     }
     return true;
   }
+
+  async function addLink(title, url) {
+    const { data, error } = await supabase
+      .from("links")
+      .insert({ project_id: activeId, user_id: userId, title: title || null, url })
+      .select()
+      .single();
+    if (error || !data) {
+      setSaveError("No se pudo crear el enlace: " + (error?.message || "error desconocido"));
+      return false;
+    }
+    setProjectData((pd) => ({ ...pd, [activeId]: { ...pd[activeId], links: [data, ...pd[activeId].links] } }));
+    return true;
+  }
+
+  async function updateLink(id, patch) {
+    setProjectData((pd) => ({
+      ...pd,
+      [activeId]: { ...pd[activeId], links: pd[activeId].links.map((l) => (l.id === id ? { ...l, ...patch } : l)) },
+    }));
+    const { error } = await supabase.from("links").update(patch).eq("id", id);
+    if (error) {
+      setSaveError("No se pudo actualizar el enlace: " + (error.message || "error desconocido"));
+      return false;
+    }
+    return true;
+  }
+
+  async function deleteLink(id) {
+    const { error } = await supabase.from("links").delete().eq("id", id);
+    if (error) {
+      setSaveError("No se pudo eliminar el enlace: " + (error.message || "error desconocido"));
+      return;
+    }
+    setProjectData((pd) => ({ ...pd, [activeId]: { ...pd[activeId], links: pd[activeId].links.filter((l) => l.id !== id) } }));
+  }
+
 
   async function addEvent(title, date, time) {
     const { data: ev, error } = await supabase
@@ -3422,6 +3582,28 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                     >
                       <AskClaudePanel projectId={active.id} color={active.color} onCreated={() => loadProjectData(active.id)} />
                     </ProjectColumn>
+                  </div>
+                )}
+                {!loadingProject && (
+                  <div className="mt-6">
+                    <button
+                      onClick={() => toggleColumnCollapse(active.id, "enlaces")}
+                      className="flex items-center gap-1.5 mb-2 text-xs uppercase tracking-wide"
+                      style={{ color: TEXT_MUTED }}
+                    >
+                      <Link2 size={13} /> Enlaces
+                      {getColumnState(active.id, "enlaces", data.links.length === 0).collapsed ? (
+                        <ChevronRight size={13} />
+                      ) : (
+                        <ChevronDown size={13} />
+                      )}
+                      {getColumnState(active.id, "enlaces", data.links.length === 0).collapsed && data.links.length > 0 && (
+                        <span className="normal-case">({data.links.length})</span>
+                      )}
+                    </button>
+                    {!getColumnState(active.id, "enlaces", data.links.length === 0).collapsed && (
+                      <LinksPanel links={data.links} onAdd={addLink} onUpdate={updateLink} onDelete={deleteLink} color={active.color} />
+                    )}
                   </div>
                 )}
               </div>
