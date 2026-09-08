@@ -1481,10 +1481,10 @@ function QuickCapture({ userId, onOpenInbox, pendingCount, refreshTick, onSyncEr
         )}
       </div>
       <div className="flex items-center justify-between mt-2">
-        <div className="flex-1 flex flex-col gap-0.5">
+        <div className="flex-1 min-w-0 flex flex-col gap-0.5">
           {recent.map((r) => (
-            <div key={r.key} className="flex items-center gap-1.5 group">
-              <span className="text-xs truncate flex-1" style={{ color: TEXT_MUTED }}>
+            <div key={r.key} className="flex items-center gap-1.5 min-w-0 group">
+              <span className="text-xs truncate flex-1 min-w-0" style={{ color: TEXT_MUTED }}>
                 {r.texto}
               </span>
               <button
