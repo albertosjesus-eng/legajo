@@ -2969,12 +2969,23 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     <div className="w-full min-h-screen flex justify-center" style={{ background: INK, paddingTop: "env(safe-area-inset-top)" }}>
       <div className="w-full max-w-6xl px-4 py-6 md:px-8 md:py-8">
         <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              if (view === "project") flushAllNotes();
+              setMobileMenuOpen(false);
+              setView("home");
+              loadProjects();
+            }}
+            className="flex items-center gap-2 text-left"
+            title="Ir al inicio"
+            aria-label="Ir al inicio de Legajo"
+          >
             <FolderOpen size={22} style={{ color: TEXT_LIGHT }} />
             <h1 className="text-2xl font-serif tracking-wide" style={{ color: TEXT_LIGHT }}>
               Legajo
             </h1>
-          </div>
+          </button>
 
           {/* Pantallas anchas (iPad/escritorio): fila completa de botones */}
           <div className="hidden md:flex items-center gap-3">
