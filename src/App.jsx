@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Plus, X, Trash2, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, FileText, CalendarDays,
   CheckSquare, Square, Loader2, FolderOpen, LogOut, Link2, Unlink2, CalendarCheck,
-  Sparkles, Send, Pencil, History, Archive, ArchiveRestore, Search, Download, PenTool, Clock, Menu, MoveHorizontal, ClipboardCopy
+  Sparkles, Send, Pencil, History, Archive, ArchiveRestore, Search, Download, PenTool, Clock, Menu, MoveHorizontal, ClipboardCopy, CalendarClock
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import Login from "./Login";
@@ -619,6 +619,14 @@ function NotesPanel({ notes, onAdd, onUpdate, onDelete, onFlush, onSaveDrawing, 
   );
 }
 
+// Suma días a una fecha "YYYY-MM-DD" sin desfases de zona horaria.
+function addDaysToDateStr(dateStr, days) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(y, m - 1, d + days);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+}
+
 function TaskRow({ t, onToggle, onDelete, onUpdate, color, today, done }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(t.text);
@@ -629,6 +637,14 @@ function TaskRow({ t, onToggle, onDelete, onUpdate, color, today, done }) {
     const ok = await onUpdate(t.id, { text: text.trim(), due_date: dueDate || null });
     if (ok) setEditing(false);
   };
+
+  const postpone = async () => {
+    const newDate = addDaysToDateStr(t.due_date, 7);
+    const ok = await onUpdate(t.id, { due_date: newDate });
+    if (ok) setDueDate(newDate);
+  };
+
+  const editingOverdue = !done && dueDate && dueDate < today;
 
   if (editing) {
     return (
@@ -647,6 +663,15 @@ function TaskRow({ t, onToggle, onDelete, onUpdate, color, today, done }) {
           className="px-2 py-1.5 rounded text-sm outline-none self-start"
           style={{ background: PAPER, color: INK_ON_PAPER }}
         />
+        {editingOverdue && (
+          <button
+            onClick={() => setDueDate(addDaysToDateStr(dueDate, 7))}
+            className="flex items-center gap-1 text-xs px-2 py-1 rounded self-start"
+            style={{ background: "#5a2e22", color: "#f0a08c" }}
+          >
+            <CalendarClock size={12} /> Posponer 7 días
+          </button>
+        )}
         <div className="flex gap-2 justify-end">
           <button onClick={() => setEditing(false)} className="text-xs px-2 py-1" style={{ color: TEXT_MUTED }}>
             Cancelar
@@ -676,6 +701,16 @@ function TaskRow({ t, onToggle, onDelete, onUpdate, color, today, done }) {
             {isOverdue ? "vencida · " : ""}
             {t.due_date.slice(5).replace("-", "/")}
           </div>
+        )}
+        {isOverdue && (
+          <button
+            onClick={postpone}
+            className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded mt-1"
+            style={{ background: "#5a2e22", color: "#f0a08c" }}
+            title={`Mover la fecha a ${addDaysToDateStr(t.due_date, 7)}`}
+          >
+            <CalendarClock size={11} /> Posponer 7 días
+          </button>
         )}
       </div>
       <button
