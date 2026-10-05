@@ -3843,13 +3843,6 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                 loadTimeline();
               }}
             />
-            <RutinasPanel
-              items={rutinas}
-              busy={rutinasBusy}
-              error={rutinasError}
-              onMarkRead={markRutinaRead}
-              onGenerate={generateRutina}
-            />
             <GlobalAskClaudePanel onApplyAction={applyClaudeAction} />
             <MilestonesTimeline projects={projects} timelineData={timelineData} onOpen={openFromTimeline} />
 
@@ -3924,6 +3917,14 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                   );
                 })()}
             </div>
+
+            <RutinasPanel
+              items={rutinas}
+              busy={rutinasBusy}
+              error={rutinasError}
+              onMarkRead={markRutinaRead}
+              onGenerate={generateRutina}
+            />
 
             {projects.some((p) => p.archived) && (
               <div className="mt-6">
