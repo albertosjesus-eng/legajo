@@ -1776,6 +1776,7 @@ function GlobalAskClaudePanel({ onApplyAction }) {
 function RutinasPanel({ items, busy, error, onMarkRead, onGenerate }) {
   const [openId, setOpenId] = useState(null);
   const [showOld, setShowOld] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const unread = items.filter((r) => !r.leido);
   const old = items.filter((r) => r.leido);
 
@@ -1816,34 +1817,44 @@ function RutinasPanel({ items, busy, error, onMarkRead, onGenerate }) {
 
   return (
     <div className="mb-6 p-4 rounded-lg" style={{ background: SURFACE2 }}>
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>
+      <div className="flex flex-wrap items-center justify-between gap-2" style={{ marginBottom: collapsed ? 0 : "0.5rem" }}>
+        <button
+          onClick={() => setCollapsed((c) => !c)}
+          className="flex items-center gap-1.5 text-xs uppercase tracking-wide"
+          style={{ color: TEXT_MUTED }}
+        >
+          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
           <Sparkles size={13} /> Claude te propone
           {unread.length > 0 && (
             <span className="px-1.5 py-0.5 rounded-full text-[10px]" style={{ background: "#C9992F", color: "#fff" }}>
               {unread.length}
             </span>
           )}
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => onGenerate("semanal", {}, true)}
-            disabled={!!busy}
-            className="text-xs px-2.5 py-1 rounded"
-            style={{ background: "rgba(255,255,255,0.08)", color: TEXT_LIGHT, opacity: busy ? 0.6 : 1 }}
-          >
-            Resumen semanal
-          </button>
-          <button
-            onClick={() => onGenerate("mensual", {}, true)}
-            disabled={!!busy}
-            className="text-xs px-2.5 py-1 rounded"
-            style={{ background: "rgba(255,255,255,0.08)", color: TEXT_LIGHT, opacity: busy ? 0.6 : 1 }}
-          >
-            Repaso mensual
-          </button>
-        </div>
+          {collapsed && busy && <Loader2 size={12} className="animate-spin" />}
+        </button>
+        {!collapsed && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onGenerate("semanal", {}, true)}
+              disabled={!!busy}
+              className="text-xs px-2.5 py-1 rounded"
+              style={{ background: "rgba(255,255,255,0.08)", color: TEXT_LIGHT, opacity: busy ? 0.6 : 1 }}
+            >
+              Resumen semanal
+            </button>
+            <button
+              onClick={() => onGenerate("mensual", {}, true)}
+              disabled={!!busy}
+              className="text-xs px-2.5 py-1 rounded"
+              style={{ background: "rgba(255,255,255,0.08)", color: TEXT_LIGHT, opacity: busy ? 0.6 : 1 }}
+            >
+              Repaso mensual
+            </button>
+          </div>
+        )}
       </div>
+      {!collapsed && (
+        <>
       {busy && (
         <div className="flex items-center gap-2 text-xs mb-2" style={{ color: TEXT_MUTED }}>
           <Loader2 size={13} className="animate-spin" /> Claude está preparando{" "}
@@ -1868,6 +1879,8 @@ function RutinasPanel({ items, busy, error, onMarkRead, onGenerate }) {
           </button>
           {showOld && <div className="flex flex-col gap-2 mt-2">{old.map((r) => renderItem(r, false))}</div>}
         </div>
+      )}
+        </>
       )}
     </div>
   );
