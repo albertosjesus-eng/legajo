@@ -627,6 +627,17 @@ function addDaysToDateStr(dateStr, days) {
   return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
 }
 
+// Semana ISO "YYYY-Www" (misma lógica que la función 'rutinas' del servidor).
+function isoWeekKeyClient(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const day = dt.getUTCDay() || 7;
+  dt.setUTCDate(dt.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((dt.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return `${dt.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
 function TaskRow({ t, onToggle, onDelete, onUpdate, color, today, done }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(t.text);
@@ -1587,10 +1598,41 @@ function HomeSummary({ projects, timelineData, onOpenTimeline }) {
   );
 }
 
-function GlobalAskClaudePanel() {
+function describeAction(a) {
+  const q = (t) => `"${t}"`;
+  const proj = a.project_name ? ` en ${a.project_name}` : "";
+  switch (a.type) {
+    case "crear_tarea":
+      return `Crear tarea${proj}: ${q(a.text)}${a.due_date ? ` · vence ${a.due_date}` : ""}`;
+    case "crear_cita":
+      return `Crear cita${proj}: ${q(a.title)} · ${a.date}${a.time ? " " + a.time : ""}`;
+    case "editar_tarea": {
+      const parts = [];
+      if (a.patch?.text) parts.push(`texto → ${q(a.patch.text)}`);
+      if (a.patch?.due_date) parts.push(`fecha ${a.before_due || "sin fecha"} → ${a.patch.due_date}`);
+      return `Editar tarea${proj}: ${q(a.before)} (${parts.join("; ")})`;
+    }
+    case "completar_tarea":
+      return `Marcar como hecha${proj}: ${q(a.text)}`;
+    case "mover_tarea":
+      return `Mover tarea ${q(a.text)} de ${a.from_project_name || "?"} a ${a.project_name}`;
+    case "editar_cita": {
+      const parts = [];
+      if (a.patch?.title) parts.push(`título → ${q(a.patch.title)}`);
+      if (a.patch?.date) parts.push(`fecha ${a.before_date} → ${a.patch.date}`);
+      if (a.patch?.time) parts.push(`hora ${a.before_time || "sin hora"} → ${a.patch.time}`);
+      return `Editar cita${proj}: ${q(a.before)} (${parts.join("; ")})`;
+    }
+    default:
+      return a.type;
+  }
+}
+
+function GlobalAskClaudePanel({ onApplyAction }) {
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [lastQA, setLastQA] = useState(null);
+  const [actions, setActions] = useState([]);
   const [error, setError] = useState("");
   const accent = PALETTE[0].hex;
 
@@ -1601,8 +1643,12 @@ function GlobalAskClaudePanel() {
     setLoading(true);
     setError("");
     setLastQA(null);
+    setActions([]);
     try {
-      const { ok, status, data } = await callEdgeFunction("ask-claude-global", { question: q });
+      let res = await callEdgeFunction("claude-global-v2", { question: q });
+      // Si la función nueva aún no está desplegada, usamos la anterior (solo consulta).
+      if (res.status === 404) res = await callEdgeFunction("ask-claude-global", { question: q });
+      const { ok, status, data } = res;
       if (!ok || data?.error) {
         const detail = data?.error
           ? data.error + (data.detail ? ": " + (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : "")
@@ -1610,12 +1656,32 @@ function GlobalAskClaudePanel() {
         setError("No se pudo obtener respuesta (" + detail + ").");
       } else {
         setLastQA({ question: q, answer: data.answer });
+        setActions((data.actions || []).map((a) => ({ ...a, status: "pending" })));
       }
     } catch (e) {
       setError("No se pudo obtener respuesta. Inténtalo de nuevo.");
     }
     setLoading(false);
   };
+
+  const setStatus = (id, status, err) =>
+    setActions((list) => list.map((x) => (x.id === id ? { ...x, status, err: err || null } : x)));
+
+  const applyOne = async (a) => {
+    setStatus(a.id, "applying");
+    const r = await onApplyAction(a);
+    setStatus(a.id, r.ok ? "done" : "error", r.error);
+    return r.ok;
+  };
+
+  const applyAll = async () => {
+    for (const a of actions.filter((x) => x.status === "pending" || x.status === "error")) {
+      // eslint-disable-next-line no-await-in-loop
+      await applyOne(a);
+    }
+  };
+
+  const pendingCount = actions.filter((a) => a.status === "pending" || a.status === "error").length;
 
   return (
     <div className="mb-6 p-4 rounded-lg" style={{ background: SURFACE2 }}>
@@ -1627,8 +1693,8 @@ function GlobalAskClaudePanel() {
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && ask()}
-          placeholder="Pregunta algo sobre cualquiera de tus proyectos..."
-          className="flex-1 px-3 py-2 rounded-md text-sm outline-none"
+          placeholder="Pregunta o pide un cambio (p. ej. «pasa a la semana que viene lo vencido»)..."
+          className="flex-1 min-w-0 px-3 py-2 rounded-md text-sm outline-none"
           style={{ background: PAPER, color: INK_ON_PAPER }}
         />
         <button
@@ -1661,6 +1727,157 @@ function GlobalAskClaudePanel() {
           <div className="text-sm px-3 py-2 rounded-md whitespace-pre-wrap" style={{ background: PAPER, color: INK_ON_PAPER }}>
             {lastQA.answer}
           </div>
+        </div>
+      )}
+      {actions.length > 0 && (
+        <div className="mt-3 flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>
+              Cambios propuestos — nada se aplica hasta que confirmes
+            </span>
+            {pendingCount > 1 && (
+              <button
+                onClick={applyAll}
+                className="text-xs px-3 py-1.5 rounded shrink-0"
+                style={{ background: "#C9992F", color: "#fff" }}
+              >
+                Aplicar todos
+              </button>
+            )}
+          </div>
+          {actions.map((a) => (
+            <div key={a.id} className="flex items-start gap-2 p-2 rounded-md" style={{ background: "rgba(255,255,255,0.05)" }}>
+              <div className="flex-1 min-w-0">
+                <div
+                  className="text-sm break-words"
+                  style={{ color: a.status === "skipped" ? TEXT_MUTED : TEXT_LIGHT, textDecoration: a.status === "skipped" ? "line-through" : "none" }}
+                >
+                  {describeAction(a)}
+                </div>
+                {a.status === "error" && (
+                  <div className="text-xs mt-0.5" style={{ color: "#e0836f" }}>
+                    No se pudo aplicar: {a.err || "error desconocido"}
+                  </div>
+                )}
+              </div>
+              {a.status === "done" ? (
+                <span className="flex items-center gap-1 text-xs shrink-0" style={{ color: "#8fae7c" }}>
+                  <CheckSquare size={14} /> Hecho
+                </span>
+              ) : a.status === "applying" ? (
+                <Loader2 size={14} className="animate-spin shrink-0" style={{ color: TEXT_MUTED }} />
+              ) : a.status === "skipped" ? null : (
+                <div className="flex items-center gap-2 shrink-0">
+                  <button onClick={() => applyOne(a)} className="text-xs px-2.5 py-1 rounded" style={{ background: "#C9992F", color: "#fff" }}>
+                    Aplicar
+                  </button>
+                  <button onClick={() => setStatus(a.id, "skipped")} title="Descartar" style={{ color: TEXT_MUTED }}>
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RutinasPanel({ items, busy, error, onMarkRead, onGenerate }) {
+  const [openId, setOpenId] = useState(null);
+  const [showOld, setShowOld] = useState(false);
+  const unread = items.filter((r) => !r.leido);
+  const old = items.filter((r) => r.leido);
+
+  const dateLabel = (iso) => {
+    try {
+      return new Date(iso).toLocaleDateString("es-ES", { day: "numeric", month: "short" });
+    } catch (e) {
+      return "";
+    }
+  };
+
+  const renderItem = (r, isUnread) => {
+    const open = isUnread || openId === r.id;
+    return (
+      <div key={r.id} className="rounded-md p-3" style={{ background: "rgba(255,255,255,0.05)" }}>
+        <div className="flex items-center justify-between gap-2">
+          <button
+            className="text-sm font-medium text-left min-w-0 flex-1"
+            style={{ color: TEXT_LIGHT }}
+            onClick={() => !isUnread && setOpenId(open ? null : r.id)}
+          >
+            {r.titulo} <span className="text-[11px] font-normal" style={{ color: TEXT_MUTED }}>· {dateLabel(r.created_at)}</span>
+          </button>
+          {isUnread && (
+            <button onClick={() => onMarkRead(r.id)} className="text-xs px-2.5 py-1 rounded shrink-0" style={{ background: "rgba(255,255,255,0.08)", color: TEXT_LIGHT }}>
+              Marcar como leído
+            </button>
+          )}
+        </div>
+        {open && (
+          <div className="text-sm mt-2 whitespace-pre-wrap break-words" style={{ color: TEXT_LIGHT }}>
+            {r.contenido}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="mb-6 p-4 rounded-lg" style={{ background: SURFACE2 }}>
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide" style={{ color: TEXT_MUTED }}>
+          <Sparkles size={13} /> Claude te propone
+          {unread.length > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full text-[10px]" style={{ background: "#C9992F", color: "#fff" }}>
+              {unread.length}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onGenerate("semanal", {}, true)}
+            disabled={!!busy}
+            className="text-xs px-2.5 py-1 rounded"
+            style={{ background: "rgba(255,255,255,0.08)", color: TEXT_LIGHT, opacity: busy ? 0.6 : 1 }}
+          >
+            Resumen semanal
+          </button>
+          <button
+            onClick={() => onGenerate("mensual", {}, true)}
+            disabled={!!busy}
+            className="text-xs px-2.5 py-1 rounded"
+            style={{ background: "rgba(255,255,255,0.08)", color: TEXT_LIGHT, opacity: busy ? 0.6 : 1 }}
+          >
+            Repaso mensual
+          </button>
+        </div>
+      </div>
+      {busy && (
+        <div className="flex items-center gap-2 text-xs mb-2" style={{ color: TEXT_MUTED }}>
+          <Loader2 size={13} className="animate-spin" /> Claude está preparando{" "}
+          {busy === "semanal" ? "el resumen semanal" : busy === "mensual" ? "el repaso mensual" : "la ficha de una cita"}...
+        </div>
+      )}
+      {error && (
+        <div className="text-xs mb-2 px-3 py-2 rounded-md" style={{ background: "#4a2b23", color: "#f2d9d0" }}>
+          {error}
+        </div>
+      )}
+      {unread.length === 0 && !busy && (
+        <p className="text-xs" style={{ color: TEXT_MUTED }}>
+          Nada pendiente de leer. El resumen semanal, el repaso mensual y la ficha previa a cada cita aparecen aquí solos al abrir la app.
+        </p>
+      )}
+      <div className="flex flex-col gap-2">{unread.map((r) => renderItem(r, true))}</div>
+      {old.length > 0 && (
+        <div className="mt-3">
+          <button onClick={() => setShowOld((v) => !v)} className="flex items-center gap-1 text-xs" style={{ color: TEXT_MUTED }}>
+            {showOld ? <ChevronUp size={13} /> : <ChevronDown size={13} />} Anteriores ({old.length})
+          </button>
+          {showOld && <div className="flex flex-col gap-2 mt-2">{old.map((r) => renderItem(r, false))}</div>}
         </div>
       )}
     </div>
@@ -1840,6 +2057,32 @@ function CapturaRow({ captura, projects, onProcess, onDiscard, onEdit, onDelete,
 
   const STATE_LABEL = { pendiente: "pendiente", procesada: "procesada", cerrada: "descartada" };
 
+  const sug = captura.estado === "pendiente" ? captura.sugerencia_json : null;
+  const sugProject = sug?.project_id ? projects.find((p) => p.id === sug.project_id) : null;
+  const SUG_LABEL = { tarea: "Tarea", cita: "Cita", nota: "Nota" };
+  const canAcceptDirect = !!(sug && sugProject && (sug.tipo !== "cita" || sug.fecha));
+
+  const acceptSuggestion = async () => {
+    setSaving(true);
+    await onProcess(captura, sug.tipo, sugProject.id, {
+      text: sug.texto || undefined,
+      dueDate: sug.fecha || "",
+      eventDate: sug.fecha || todayISO(),
+      eventTime: sug.hora || "",
+    });
+    setSaving(false);
+  };
+
+  const adjustSuggestion = () => {
+    if (sugProject) setProjectId(sugProject.id);
+    if (sug.fecha) {
+      setDueDate(sug.fecha);
+      setEventDate(sug.fecha);
+    }
+    if (sug.hora) setEventTime(sug.hora);
+    setMode(sug.tipo);
+  };
+
   if (mode === "editar") {
     return (
       <div className="p-3 rounded-md flex flex-col gap-2" style={{ background: SURFACE2 }}>
@@ -1942,6 +2185,38 @@ function CapturaRow({ captura, projects, onProcess, onDiscard, onEdit, onDelete,
             {STATE_LABEL[captura.estado] || captura.estado}
           </span>
         )}
+        {sug && SUG_LABEL[sug.tipo] && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-[11px] flex items-center gap-1" style={{ color: "#e0b84a" }}>
+              <Sparkles size={11} />
+              {SUG_LABEL[sug.tipo]}
+              {sugProject ? ` · ${sugProject.name}` : ""}
+              {sug.fecha ? ` · ${sug.fecha}${sug.hora ? " " + sug.hora : ""}` : ""}
+            </span>
+            {canAcceptDirect && (
+              <button
+                onClick={acceptSuggestion}
+                disabled={saving}
+                className="text-[11px] px-2 py-0.5 rounded"
+                style={{ background: "#C9992F", color: "#fff", opacity: saving ? 0.7 : 1 }}
+              >
+                {saving ? "..." : "Aceptar"}
+              </button>
+            )}
+            <button
+              onClick={adjustSuggestion}
+              className="text-[11px] px-2 py-0.5 rounded"
+              style={{ background: "rgba(255,255,255,0.08)", color: TEXT_LIGHT }}
+            >
+              Ajustar
+            </button>
+            {sug.motivo && (
+              <span className="text-[11px] w-full" style={{ color: TEXT_MUTED }}>
+                {sug.motivo}
+              </span>
+            )}
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-2 shrink-0">
         {captura.estado === "pendiente" && (
@@ -1987,7 +2262,7 @@ function CapturaRow({ captura, projects, onProcess, onDiscard, onEdit, onDelete,
   );
 }
 
-function BandejaView({ projects, capturas, loading, onProcess, onDiscard, onEdit, onDelete, showAll, onToggleShowAll }) {
+function BandejaView({ projects, capturas, loading, onProcess, onDiscard, onEdit, onDelete, showAll, onToggleShowAll, classifying, onClassify }) {
   const activeProjects = projects.filter((p) => !p.archived);
   return (
     <div>
@@ -2006,6 +2281,18 @@ function BandejaView({ projects, capturas, loading, onProcess, onDiscard, onEdit
         >
           Todo el historial
         </button>
+        {!showAll && (
+          <button
+            onClick={onClassify}
+            disabled={classifying}
+            className="ml-auto flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md"
+            style={{ background: "rgba(255,255,255,0.08)", color: TEXT_LIGHT, opacity: classifying ? 0.7 : 1 }}
+            title="Que Claude sugiera proyecto y tipo para las capturas pendientes"
+          >
+            {classifying ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+            {classifying ? "Clasificando..." : "Sugerir con Claude"}
+          </button>
+        )}
       </div>
       {loading ? (
         <div className="flex items-center gap-2 py-16 justify-center" style={{ color: TEXT_MUTED }}>
@@ -2223,6 +2510,11 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   const [loadError, setLoadError] = useState("");
   const [saveError, setSaveError] = useState("");
   const [googleConnected, setGoogleConnected] = useState(false);
+  const [classifying, setClassifying] = useState(false);
+  const [rutinas, setRutinas] = useState([]);
+  const [rutinasBusy, setRutinasBusy] = useState("");
+  const [rutinasError, setRutinasError] = useState("");
+  const rutinasAutoRan = useRef(false);
   const [connectingGoogle, setConnectingGoogle] = useState(false);
   const [googleNeedsReconnect, setGoogleNeedsReconnect] = useState(false);
   const [googleDaysLeft, setGoogleDaysLeft] = useState(null);
@@ -2481,6 +2773,222 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     setView("project");
   }
 
+  // ---------- Acciones propuestas por Claude (se aplican solo tras confirmar) ----------
+  async function applyClaudeAction(a) {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const touched = new Set();
+    try {
+      if (a.type === "crear_tarea") {
+        const { data: task, error } = await supabase
+          .from("tasks")
+          .insert({ project_id: a.project_id, user_id: userId, text: a.text, due_date: a.due_date || null })
+          .select()
+          .single();
+        if (error || !task) throw new Error(error?.message || "no se pudo crear la tarea");
+        touched.add(a.project_id);
+        if (googleConnected) {
+          try {
+            const { data } = await callEdgeFunction("sync-google-task", {
+              action: "create",
+              task: { text: task.text, due_date: task.due_date, done: task.done },
+            });
+            if (data?.google_task_id) {
+              await supabase.from("tasks").update({ google_task_id: data.google_task_id }).eq("id", task.id);
+            } else if (data?.error) {
+              setSaveError("La tarea se guardó en Legajo, pero no se sincronizó con Google Tasks: " + data.error);
+            }
+          } catch (e) {
+            setSaveError("La tarea se guardó en Legajo, pero no se sincronizó con Google Tasks: " + String(e));
+          }
+        }
+      } else if (a.type === "crear_cita") {
+        const { data: ev, error } = await supabase
+          .from("events")
+          .insert({ project_id: a.project_id, user_id: userId, title: a.title, date: a.date, time: a.time || null })
+          .select()
+          .single();
+        if (error || !ev) throw new Error(error?.message || "no se pudo crear la cita");
+        touched.add(a.project_id);
+        if (googleConnected) {
+          try {
+            const { data } = await callEdgeFunction("sync-calendar-event", {
+              action: "create",
+              event: { title: ev.title, date: ev.date, time: ev.time, time_zone: tz },
+            });
+            if (data?.google_event_id) {
+              await supabase.from("events").update({ google_event_id: data.google_event_id }).eq("id", ev.id);
+            } else if (data?.error) {
+              setSaveError("La cita se guardó en Legajo, pero no se sincronizó con Google Calendar: " + data.error);
+            }
+          } catch (e) {
+            setSaveError("La cita se guardó en Legajo, pero no se sincronizó con Google Calendar: " + String(e));
+          }
+        }
+      } else if (a.type === "editar_tarea" || a.type === "completar_tarea") {
+        const patch = a.type === "completar_tarea" ? { done: true } : a.patch;
+        const { data: before, error: be } = await supabase.from("tasks").select("*").eq("id", a.task_id).single();
+        if (be || !before) throw new Error(be?.message || "la tarea ya no existe");
+        const { error } = await supabase.from("tasks").update(patch).eq("id", a.task_id);
+        if (error) throw new Error(error.message);
+        touched.add(before.project_id);
+        if (googleConnected && before.google_task_id) {
+          try {
+            const { data } = await callEdgeFunction("sync-google-task", {
+              action: "update",
+              task: {
+                google_task_id: before.google_task_id,
+                text: patch.text ?? before.text,
+                due_date: patch.due_date ?? before.due_date,
+                done: patch.done ?? before.done,
+              },
+            });
+            if (data?.error) setSaveError("La tarea se actualizó en Legajo, pero no en Google Tasks: " + data.error);
+          } catch (e) {
+            setSaveError("La tarea se actualizó en Legajo, pero no en Google Tasks: " + String(e));
+          }
+        }
+      } else if (a.type === "mover_tarea") {
+        const { error } = await supabase.from("tasks").update({ project_id: a.project_id }).eq("id", a.task_id);
+        if (error) throw new Error(error.message);
+        touched.add(a.from_project_id);
+        touched.add(a.project_id);
+      } else if (a.type === "editar_cita") {
+        const { data: before, error: be } = await supabase.from("events").select("*").eq("id", a.event_id).single();
+        if (be || !before) throw new Error(be?.message || "la cita ya no existe");
+        const { error } = await supabase.from("events").update(a.patch).eq("id", a.event_id);
+        if (error) throw new Error(error.message);
+        touched.add(before.project_id);
+        if (googleConnected && before.google_event_id) {
+          try {
+            const { data } = await callEdgeFunction("sync-calendar-event", {
+              action: "update",
+              event: {
+                google_event_id: before.google_event_id,
+                title: a.patch.title ?? before.title,
+                date: a.patch.date ?? before.date,
+                time: a.patch.time ?? before.time,
+                time_zone: tz,
+              },
+            });
+            if (data?.error) setSaveError("La cita se actualizó en Legajo, pero no en Google Calendar: " + data.error);
+          } catch (e) {
+            setSaveError("La cita se actualizó en Legajo, pero no en Google Calendar: " + String(e));
+          }
+        }
+      } else {
+        throw new Error("acción no reconocida");
+      }
+
+      // Refrescar lo que ya estuviera cargado en pantalla
+      touched.forEach((pid) => {
+        if (projectData[pid]) loadProjectData(pid);
+      });
+      loadTimeline();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e?.message || String(e) };
+    }
+  }
+
+  // ---------- R1: sugerencias de Claude para las capturas pendientes ----------
+  async function classifyPending(silent) {
+    if (classifying) return;
+    setClassifying(true);
+    try {
+      const { ok, status, data } = await callEdgeFunction("classify-captures");
+      if (status === 404) {
+        if (!silent) setSaveError("La función 'classify-captures' aún no está desplegada en Supabase.");
+      } else if (!ok || data?.error) {
+        setSaveError("No se pudieron generar sugerencias: " + (data?.error || `HTTP ${status}`) + (data?.detail ? " — " + (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : ""));
+      } else if (data?.count > 0) {
+        await loadInbox(false);
+      }
+    } catch (e) {
+      setSaveError("No se pudieron generar sugerencias: " + String(e));
+    }
+    setClassifying(false);
+  }
+
+  // ---------- R2/R3/R4: rutinas de Claude ----------
+  async function loadRutinas() {
+    const { data, error } = await supabase
+      .from("rutinas_resultados")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(40);
+    if (error) {
+      setRutinasError("No se pudieron cargar las rutinas (¿falta ejecutar rutinas.sql en Supabase?): " + error.message);
+      return null;
+    }
+    setRutinas(data || []);
+    return data || [];
+  }
+
+  async function generateRutina(tipo, extra, force) {
+    setRutinasBusy(tipo);
+    setRutinasError("");
+    try {
+      const { ok, status, data } = await callEdgeFunction("rutinas", { tipo, ...(extra || {}), force: !!force });
+      if (status === 404) {
+        setRutinasError("La función 'rutinas' aún no está desplegada en Supabase.");
+      } else if (!ok || data?.error) {
+        setRutinasError(
+          "No se pudo generar (" + (data?.error || `HTTP ${status}`) + (data?.detail ? ": " + (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : "") + ")."
+        );
+      } else if (data?.resultado) {
+        setRutinas((prev) => [data.resultado, ...prev.filter((r) => r.id !== data.resultado.id)]);
+      }
+    } catch (e) {
+      setRutinasError("No se pudo generar: " + String(e));
+    }
+    setRutinasBusy("");
+  }
+
+  async function markRutinaRead(id) {
+    setRutinas((prev) => prev.map((r) => (r.id === id ? { ...r, leido: true } : r)));
+    const { error } = await supabase.from("rutinas_resultados").update({ leido: true }).eq("id", id);
+    if (error) setSaveError("No se pudo marcar como leído: " + error.message);
+  }
+
+  async function runAutoRoutines() {
+    const rows = await loadRutinas();
+    if (!rows) return;
+    const today = todayISO();
+    const has = (tipo, clave) => rows.some((r) => r.tipo === tipo && r.clave === clave);
+    const jobs = [];
+
+    if (!has("semanal", isoWeekKeyClient(today))) jobs.push({ tipo: "semanal" });
+
+    if (Number(today.slice(8, 10)) <= 7) {
+      const prevMonth = addDaysToDateStr(today.slice(0, 7) + "-01", -1).slice(0, 7);
+      if (!has("mensual", prevMonth)) jobs.push({ tipo: "mensual" });
+    }
+
+    const activeIds = new Set(projects.filter((p) => !p.archived).map((p) => p.id));
+    const { data: evs } = await supabase
+      .from("events")
+      .select("id,project_id,date")
+      .gte("date", today)
+      .lte("date", addDaysToDateStr(today, 1))
+      .limit(10);
+    (evs || [])
+      .filter((e) => activeIds.has(e.project_id) && !has("cita", e.id))
+      .slice(0, 3)
+      .forEach((e) => jobs.push({ tipo: "cita", extra: { event_id: e.id } }));
+
+    for (const j of jobs) {
+      // eslint-disable-next-line no-await-in-loop
+      await generateRutina(j.tipo, j.extra, false);
+    }
+  }
+
+  useEffect(() => {
+    if (rutinasAutoRan.current || projects.length === 0) return;
+    rutinasAutoRan.current = true;
+    runAutoRoutines();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects.length]);
+
   async function loadPendingCapturasCount() {
     const { count, error } = await supabase
       .from("capturas")
@@ -2511,7 +3019,8 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     setView("bandeja");
     const showAll = pendingCapturasCount === 0;
     setInboxShowAll(showAll);
-    loadInbox(showAll);
+    await loadInbox(showAll);
+    if (!showAll) classifyPending(true);
   }
 
   async function processCaptura(captura, mode, projectId, extra) {
@@ -2524,12 +3033,12 @@ function LegajoApp({ userId, userEmail, onLogout }) {
       } else if (mode === "tarea") {
         const { error } = await supabase
           .from("tasks")
-          .insert({ project_id: projectId, user_id: userId, text: captura.texto, due_date: extra.dueDate || null });
+          .insert({ project_id: projectId, user_id: userId, text: extra.text || captura.texto, due_date: extra.dueDate || null });
         if (error) throw error;
       } else if (mode === "cita") {
         const { error } = await supabase
           .from("events")
-          .insert({ project_id: projectId, user_id: userId, title: captura.texto, date: extra.eventDate, time: extra.eventTime || null });
+          .insert({ project_id: projectId, user_id: userId, title: extra.text || captura.texto, date: extra.eventDate, time: extra.eventTime || null });
         if (error) throw error;
       }
       const { error: updError } = await supabase
@@ -3366,7 +3875,14 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                 loadTimeline();
               }}
             />
-            <GlobalAskClaudePanel />
+            <RutinasPanel
+              items={rutinas}
+              busy={rutinasBusy}
+              error={rutinasError}
+              onMarkRead={markRutinaRead}
+              onGenerate={generateRutina}
+            />
+            <GlobalAskClaudePanel onApplyAction={applyClaudeAction} />
             <MilestonesTimeline projects={projects} timelineData={timelineData} onOpen={openFromTimeline} />
 
             <div className="mb-8">
@@ -3517,6 +4033,8 @@ function LegajoApp({ userId, userEmail, onLogout }) {
               onDelete={deleteCapturaHard}
               showAll={inboxShowAll}
               onToggleShowAll={toggleInboxShowAll}
+              classifying={classifying}
+              onClassify={() => classifyPending(false)}
             />
           </div>
         ) : (
