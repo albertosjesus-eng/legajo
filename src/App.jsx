@@ -3001,7 +3001,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   }
 
   return (
-    <div className="w-full min-h-screen flex justify-center" style={{ background: INK, paddingTop: "env(safe-area-inset-top)" }}>
+    <div className="w-full min-h-screen flex justify-center overflow-x-hidden" style={{ background: INK, minHeight: "100dvh", paddingTop: "env(safe-area-inset-top)" }}>
       <div className="w-full max-w-6xl px-4 py-6 md:px-8 md:py-8">
         <div className="flex items-center justify-between mb-6">
           <button

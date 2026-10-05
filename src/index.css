@@ -2,12 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body, #root {
-  height: 100%;
+/* Fondo oscuro en toda la página (html y body), para que en el móvil no asome
+   ninguna franja blanca por los lados, abajo ni al rebotar el scroll. */
+html {
+  background-color: #1E1C1A;
+  color-scheme: dark;
+  width: 100%;
+  min-height: 100%;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background-color: #1E1C1A;
+  overflow-x: hidden;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background-color: #1E1C1A;
 }
 
 /* Rejilla de las 4 columnas del proyecto. En móvil/tablet siempre 1 o 2
