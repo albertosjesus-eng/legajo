@@ -627,17 +627,6 @@ function addDaysToDateStr(dateStr, days) {
   return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
 }
 
-// Semana ISO "YYYY-Www" (misma lógica que la función 'rutinas' del servidor).
-function isoWeekKeyClient(dateStr) {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  const day = dt.getUTCDay() || 7;
-  dt.setUTCDate(dt.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
-  const week = Math.ceil(((dt.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-  return `${dt.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
-}
-
 function TaskRow({ t, onToggle, onDelete, onUpdate, color, today, done }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(t.text);
@@ -1868,7 +1857,7 @@ function RutinasPanel({ items, busy, error, onMarkRead, onGenerate }) {
       )}
       {unread.length === 0 && !busy && (
         <p className="text-xs" style={{ color: TEXT_MUTED }}>
-          Nada pendiente de leer. El resumen semanal, el repaso mensual y la ficha previa a cada cita aparecen aquí solos al abrir la app.
+          Nada pendiente de leer. Pulsa «Resumen semanal» o «Repaso mensual» cuando quieras que Claude te prepare uno.
         </p>
       )}
       <div className="flex flex-col gap-2">{unread.map((r) => renderItem(r, true))}</div>
@@ -2514,7 +2503,6 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   const [rutinas, setRutinas] = useState([]);
   const [rutinasBusy, setRutinasBusy] = useState("");
   const [rutinasError, setRutinasError] = useState("");
-  const rutinasAutoRan = useRef(false);
   const [connectingGoogle, setConnectingGoogle] = useState(false);
   const [googleNeedsReconnect, setGoogleNeedsReconnect] = useState(false);
   const [googleDaysLeft, setGoogleDaysLeft] = useState(null);
@@ -2950,44 +2938,11 @@ function LegajoApp({ userId, userEmail, onLogout }) {
     if (error) setSaveError("No se pudo marcar como leído: " + error.message);
   }
 
-  async function runAutoRoutines() {
-    const rows = await loadRutinas();
-    if (!rows) return;
-    const today = todayISO();
-    const has = (tipo, clave) => rows.some((r) => r.tipo === tipo && r.clave === clave);
-    const jobs = [];
-
-    if (!has("semanal", isoWeekKeyClient(today))) jobs.push({ tipo: "semanal" });
-
-    if (Number(today.slice(8, 10)) <= 7) {
-      const prevMonth = addDaysToDateStr(today.slice(0, 7) + "-01", -1).slice(0, 7);
-      if (!has("mensual", prevMonth)) jobs.push({ tipo: "mensual" });
-    }
-
-    const activeIds = new Set(projects.filter((p) => !p.archived).map((p) => p.id));
-    const { data: evs } = await supabase
-      .from("events")
-      .select("id,project_id,date")
-      .gte("date", today)
-      .lte("date", addDaysToDateStr(today, 1))
-      .limit(10);
-    (evs || [])
-      .filter((e) => activeIds.has(e.project_id) && !has("cita", e.id))
-      .slice(0, 3)
-      .forEach((e) => jobs.push({ tipo: "cita", extra: { event_id: e.id } }));
-
-    for (const j of jobs) {
-      // eslint-disable-next-line no-await-in-loop
-      await generateRutina(j.tipo, j.extra, false);
-    }
-  }
-
+  // Solo se cargan los resultados ya guardados; Claude no genera nada hasta que se pulsa un botón.
   useEffect(() => {
-    if (rutinasAutoRan.current || projects.length === 0) return;
-    rutinasAutoRan.current = true;
-    runAutoRoutines();
+    loadRutinas();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projects.length]);
+  }, []);
 
   async function loadPendingCapturasCount() {
     const { count, error } = await supabase
