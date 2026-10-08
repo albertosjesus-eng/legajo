@@ -51,3 +51,16 @@ body {
     grid-template-columns: var(--w-tareas, 1fr) var(--w-agenda, 1fr) var(--w-notas, 1fr) var(--w-claude, 1fr);
   }
 }
+
+/* Los campos de fecha y hora tienen fondo claro: forzamos el esquema claro en
+   ellos para que el icono del calendario/reloj salga oscuro y se vea bien
+   (con el esquema oscuro global salía blanco sobre blanco). */
+input[type="date"],
+input[type="time"] {
+  color-scheme: light;
+}
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  opacity: 1;
+  cursor: pointer;
+}
