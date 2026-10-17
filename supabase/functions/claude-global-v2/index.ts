@@ -12,7 +12,15 @@ const TZ = "Europe/Madrid";
 
 type ProjectRow = { id: string; name: string; category: string | null };
 type NoteRow = { project_id: string; title: string | null; body: string | null };
-type TaskRow = { id: string; project_id: string; text: string; done: boolean; due_date: string | null };
+type TaskRow = { id: string; project_id: string; text: string; done: boolean; due_date: string | null; waiting_on: string | null; waiting_since: string | null };
+// Etiqueta "[Esperando a X desde hace N días]" para tareas que dependen de otra persona.
+const waitTag = (t: { waiting_on?: string | null; waiting_since?: string | null }) => {
+  if (!t.waiting_on) return "";
+  const days = t.waiting_since ? Math.max(0, Math.floor((Date.now() - new Date(t.waiting_since).getTime()) / 86400000)) : 0;
+  const when = days === 0 ? "desde hoy" : days === 1 ? "desde hace 1 día" : `desde hace ${days} días`;
+  return ` [Esperando a ${t.waiting_on} ${when}]`;
+};
+
 type EventRow = { id: string; project_id: string; title: string; date: string; time: string | null };
 
 const isDate = (s: unknown) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s));
@@ -112,7 +120,7 @@ export default {
 
       const [notesRes, tasksRes, eventsRes] = await Promise.all([
         supabase.from("notes").select("project_id,title,body").in("project_id", projectIds),
-        supabase.from("tasks").select("id,project_id,text,done,due_date").in("project_id", projectIds).eq("done", false),
+        supabase.from("tasks").select("id,project_id,text,done,due_date,waiting_on,waiting_since").in("project_id", projectIds).eq("done", false),
         supabase.from("events").select("id,project_id,title,date,time").in("project_id", projectIds).gte("date", from),
       ]);
       if (notesRes.error || tasksRes.error || eventsRes.error) {
@@ -136,7 +144,7 @@ export default {
         pNotes.forEach((n) => lines.push(`- ${n.title || "(sin título)"}: ${n.body || ""}`));
         lines.push(`Tareas pendientes (${pTasks.length}):`);
         if (!pTasks.length) lines.push("(ninguna)");
-        pTasks.forEach((t) => lines.push(`- [task_id:${t.id}] ${t.due_date ? `(vence ${t.due_date}) ` : ""}${t.text}`));
+        pTasks.forEach((t) => lines.push(`- [task_id:${t.id}] ${t.due_date ? `(vence ${t.due_date}) ` : ""}${t.text}${waitTag(t)}`));
         lines.push(`Agenda (${pEvents.length}):`);
         if (!pEvents.length) lines.push("(ninguna)");
         pEvents.forEach((e) => lines.push(`- [event_id:${e.id}] ${e.date}${e.time ? " " + e.time : ""}: ${e.title}`));
@@ -155,7 +163,8 @@ export default {
         "NUNCA digas que ya está hecho: di 'te propongo…' y resume en una frase qué has preparado. Usa solo los " +
         "identificadores que aparecen en el contexto. Convierte fechas relativas (mañana, el viernes, en una semana) " +
         "a YYYY-MM-DD a partir de la fecha de hoy. Si la petición no encaja con ningún proyecto o es ambigua, pregunta " +
-        "en vez de proponer. Si el usuario solo pregunta, no propongas acciones.";
+        "en vez de proponer. Si el usuario solo pregunta, no propongas acciones. " +
+        "Las tareas marcadas «[Esperando a X desde hace N días]» dependen de otra persona (no te tocan al usuario). Si se pregunta qué se está esperando, o a quién, lístalas indicando persona, tarea y antigüedad, de la más antigua a la más reciente.";
 
       const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",

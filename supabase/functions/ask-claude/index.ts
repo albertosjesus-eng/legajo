@@ -13,7 +13,15 @@ const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 const MAX_TOOL_ITERATIONS = 8;
 
 type NoteRow = { title: string | null; body: string | null };
-type TaskRow = { text: string; done: boolean; due_date: string | null };
+type TaskRow = { text: string; done: boolean; due_date: string | null; waiting_on: string | null; waiting_since: string | null };
+// Etiqueta "[Esperando a X desde hace N días]" para tareas que dependen de otra persona.
+const waitTag = (t: { waiting_on?: string | null; waiting_since?: string | null }) => {
+  if (!t.waiting_on) return "";
+  const days = t.waiting_since ? Math.max(0, Math.floor((Date.now() - new Date(t.waiting_since).getTime()) / 86400000)) : 0;
+  const when = days === 0 ? "desde hoy" : days === 1 ? "desde hace 1 día" : `desde hace ${days} días`;
+  return ` [Esperando a ${t.waiting_on} ${when}]`;
+};
+
 type EventRow = { title: string; date: string; time: string | null };
 
 const tools = [
@@ -104,7 +112,7 @@ export default {
 
       const [notesRes, tasksRes, eventsRes] = await Promise.all([
         supabase.from("notes").select("title,body").eq("project_id", project_id),
-        supabase.from("tasks").select("text,done,due_date").eq("project_id", project_id),
+        supabase.from("tasks").select("text,done,due_date,waiting_on,waiting_since").eq("project_id", project_id),
         supabase.from("events").select("title,date,time").eq("project_id", project_id),
       ]);
       if (notesRes.error || tasksRes.error || eventsRes.error) {
@@ -134,7 +142,7 @@ export default {
       lines.push("");
       lines.push(`Tareas (${tasks.length}):`);
       if (tasks.length === 0) lines.push("(ninguna)");
-      tasks.forEach((t) => lines.push(`- [${t.done ? "hecha" : "pendiente"}]${t.due_date ? ` (vence ${t.due_date})` : ""} ${t.text}`));
+      tasks.forEach((t) => lines.push(`- [${t.done ? "hecha" : "pendiente"}]${t.due_date ? ` (vence ${t.due_date})` : ""} ${t.text}${t.done ? "" : waitTag(t)}`));
       lines.push("");
       lines.push(`Agenda (${events.length}):`);
       if (events.length === 0) lines.push("(ninguna)");
@@ -159,7 +167,8 @@ export default {
         "si dice ok: false, la acción NO se realizó en absoluto, aunque parte de los datos parecieran correctos. " +
         "Nunca digas que algo se ha creado, ni siquiera parcialmente, si el resultado fue ok: false — en ese caso " +
         "dilo con claridad como un fallo, sin inventar una historia de éxito parcial. No uses las herramientas si el " +
-        "usuario no lo ha pedido explícitamente.";
+        "usuario no lo ha pedido explícitamente. " +
+        "Las tareas marcadas «[Esperando a X desde hace N días]» dependen de otra persona (no te tocan al usuario). Si se pregunta qué se está esperando, o a quién, lístalas indicando persona, tarea y antigüedad, de la más antigua a la más reciente.";
 
       const messages: Array<{ role: string; content: unknown }> = [
         { role: "user", content: `Contexto del proyecto:\n\n${context}\n\nPregunta: ${question}` },

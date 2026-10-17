@@ -11,7 +11,15 @@ const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 
 type ProjectRow = { id: string; name: string };
 type NoteRow = { project_id: string; title: string | null; body: string | null };
-type TaskRow = { project_id: string; text: string; done: boolean; due_date: string | null };
+type TaskRow = { project_id: string; text: string; done: boolean; due_date: string | null; waiting_on: string | null; waiting_since: string | null };
+// Etiqueta "[Esperando a X desde hace N días]" para tareas que dependen de otra persona.
+const waitTag = (t: { waiting_on?: string | null; waiting_since?: string | null }) => {
+  if (!t.waiting_on) return "";
+  const days = t.waiting_since ? Math.max(0, Math.floor((Date.now() - new Date(t.waiting_since).getTime()) / 86400000)) : 0;
+  const when = days === 0 ? "desde hoy" : days === 1 ? "desde hace 1 día" : `desde hace ${days} días`;
+  return ` [Esperando a ${t.waiting_on} ${when}]`;
+};
+
 type EventRow = { project_id: string; title: string; date: string; time: string | null };
 
 export default {
@@ -35,7 +43,7 @@ export default {
 
       const [notesRes, tasksRes, eventsRes] = await Promise.all([
         supabase.from("notes").select("project_id,title,body").in("project_id", projectIds),
-        supabase.from("tasks").select("project_id,text,done,due_date").in("project_id", projectIds).eq("done", false),
+        supabase.from("tasks").select("project_id,text,done,due_date,waiting_on,waiting_since").in("project_id", projectIds).eq("done", false),
         supabase.from("events").select("project_id,title,date,time").in("project_id", projectIds),
       ]);
 
@@ -71,7 +79,7 @@ export default {
 
         lines.push(`Tareas pendientes (${pTasks.length}):`);
         if (pTasks.length === 0) lines.push("(ninguna)");
-        pTasks.forEach((t) => lines.push(`- ${t.due_date ? `(vence ${t.due_date}) ` : ""}${t.text}`));
+        pTasks.forEach((t) => lines.push(`- ${t.due_date ? `(vence ${t.due_date}) ` : ""}${t.text}${waitTag(t)}`));
 
         lines.push(`Agenda (${pEvents.length}):`);
         if (pEvents.length === 0) lines.push("(ninguna)");
@@ -94,7 +102,8 @@ export default {
         "Señala huecos o riesgos relevantes que veas cruzando proyectos: tareas vencidas, citas próximas sin tarea " +
         "asociada, contradicciones, sobrecarga de una semana frente a otra, etc. No inventes datos que no estén en " +
         "el contexto; si falta información, dilo en vez de suponer. No puedes crear ni modificar nada, solo " +
-        "responder.";
+        "responder. " +
+        "Las tareas marcadas «[Esperando a X desde hace N días]» dependen de otra persona (no te tocan al usuario). Si se pregunta qué se está esperando, o a quién, lístalas indicando persona, tarea y antigüedad, de la más antigua a la más reciente.";
 
       const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",

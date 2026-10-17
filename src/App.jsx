@@ -627,14 +627,25 @@ function addDaysToDateStr(dateStr, days) {
   return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
 }
 
+// Texto "hoy" / "1 día" / "N días" desde una fecha ISO (waiting_since).
+function waitingDaysLabel(since) {
+  const days = since ? Math.max(0, Math.floor((Date.now() - new Date(since).getTime()) / 86400000)) : 0;
+  return days === 0 ? "hoy" : days === 1 ? "1 día" : `${days} días`;
+}
+
 function TaskRow({ t, onToggle, onDelete, onUpdate, color, today, done }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(t.text);
   const [dueDate, setDueDate] = useState(t.due_date || "");
+  const [waitingOn, setWaitingOn] = useState(t.waiting_on || "");
+  const [showWaiting, setShowWaiting] = useState(!!t.waiting_on);
 
   const save = async () => {
     if (!text.trim()) return;
-    const ok = await onUpdate(t.id, { text: text.trim(), due_date: dueDate || null });
+    const patch = { text: text.trim(), due_date: dueDate || null };
+    // Solo se envía si ha cambiado (waiting_since lo gestiona la base de datos).
+    if ((waitingOn.trim() || null) !== (t.waiting_on || null)) patch.waiting_on = waitingOn.trim() || null;
+    const ok = await onUpdate(t.id, patch);
     if (ok) setEditing(false);
   };
 
@@ -672,6 +683,21 @@ function TaskRow({ t, onToggle, onDelete, onUpdate, color, today, done }) {
             <CalendarClock size={12} /> Posponer 7 días
           </button>
         )}
+        {showWaiting ? (
+          <input
+            autoFocus={!t.waiting_on}
+            value={waitingOn}
+            onChange={(e) => setWaitingOn(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && save()}
+            placeholder="Espero a… (vacío = me toca a mí)"
+            className="px-2 py-1.5 rounded text-sm outline-none"
+            style={{ background: PAPER, color: INK_ON_PAPER }}
+          />
+        ) : (
+          <button onClick={() => setShowWaiting(true)} className="text-xs self-start" style={{ color: TEXT_MUTED }}>
+            + Espero a…
+          </button>
+        )}
         <div className="flex gap-2 justify-end">
           <button onClick={() => setEditing(false)} className="text-xs px-2 py-1" style={{ color: TEXT_MUTED }}>
             Cancelar
@@ -700,6 +726,11 @@ function TaskRow({ t, onToggle, onDelete, onUpdate, color, today, done }) {
           <div className="text-[11px] font-mono mt-0.5" style={{ color: isOverdue ? "#e0836f" : isToday ? color : TEXT_MUTED }}>
             {isOverdue ? "vencida · " : ""}
             {t.due_date.slice(5).replace("-", "/")}
+          </div>
+        )}
+        {!done && t.waiting_on && (
+          <div className="text-[11px] mt-0.5 break-words" style={{ color: "#e0b84a" }}>
+            Esperando a {t.waiting_on} · {waitingDaysLabel(t.waiting_since)}
           </div>
         )}
         {isOverdue && (
@@ -1890,6 +1921,64 @@ function dateToTime(dateStr) {
   return new Date(dateStr + "T00:00:00").getTime();
 }
 
+function EsperandoPanel({ projects, timelineData, onOpen }) {
+  const [collapsed, setCollapsed] = useState(true);
+  if (!timelineData) return null;
+  const projectById = Object.fromEntries(projects.filter((p) => !p.archived).map((p) => [p.id, p]));
+  const items = timelineData.tasks
+    .filter((t) => !t.done && t.waiting_on && projectById[t.project_id])
+    .sort((a, b) => (a.waiting_since || "9999").localeCompare(b.waiting_since || "9999"));
+
+  return (
+    <div className="mb-4 p-4 rounded-lg" style={{ background: SURFACE2 }}>
+      <button
+        onClick={() => setCollapsed((c) => !c)}
+        className="flex items-center gap-1.5 text-xs uppercase tracking-wide"
+        style={{ color: TEXT_MUTED }}
+      >
+        {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+        <Clock size={13} /> Esperando
+        {items.length > 0 && (
+          <span className="px-1.5 py-0.5 rounded-full text-[10px]" style={{ background: "#C9992F", color: "#fff" }}>
+            {items.length}
+          </span>
+        )}
+      </button>
+      {!collapsed && (
+        <div className="flex flex-col gap-1.5 mt-3">
+          {items.length === 0 ? (
+            <p className="text-xs" style={{ color: TEXT_MUTED }}>
+              No estás esperando a nadie.
+            </p>
+          ) : (
+            items.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => onOpen(t.project_id)}
+                className="flex items-start justify-between gap-3 p-2 rounded-md text-left"
+                style={{ background: "rgba(255,255,255,0.05)" }}
+              >
+                <div className="min-w-0">
+                  <div className="text-sm break-words" style={{ color: TEXT_LIGHT }}>
+                    {t.text}
+                  </div>
+                  <div className="text-[11px] mt-0.5 flex items-center gap-1.5" style={{ color: TEXT_MUTED }}>
+                    <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ background: projectById[t.project_id].color }} />
+                    {projectById[t.project_id].name} · a {t.waiting_on}
+                  </div>
+                </div>
+                <span className="text-[11px] font-mono shrink-0" style={{ color: "#e0b84a" }}>
+                  {waitingDaysLabel(t.waiting_since)}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MilestonesTimeline({ projects, timelineData, onOpen }) {
   const [expanded, setExpanded] = useState(false);
   if (!timelineData) return null;
@@ -2719,7 +2808,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
   async function loadTimeline() {
     setLoadingTimeline(true);
     const [tasksRes, eventsRes, notesRes] = await Promise.all([
-      supabase.from("tasks").select("id,project_id,text,done,due_date"),
+      supabase.from("tasks").select("id,project_id,text,done,due_date,waiting_on,waiting_since"),
       supabase.from("events").select("id,project_id,title,date,time"),
       supabase.from("notes").select("id,project_id,title,body,updated_at"),
     ]);
@@ -3843,6 +3932,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                 loadTimeline();
               }}
             />
+            <EsperandoPanel projects={projects} timelineData={timelineData} onOpen={openFromTimeline} />
             <GlobalAskClaudePanel onApplyAction={applyClaudeAction} />
             <MilestonesTimeline projects={projects} timelineData={timelineData} onOpen={openFromTimeline} />
 
