@@ -3933,7 +3933,6 @@ function LegajoApp({ userId, userEmail, onLogout }) {
               }}
             />
             <EsperandoPanel projects={projects} timelineData={timelineData} onOpen={openFromTimeline} />
-            <GlobalAskClaudePanel onApplyAction={applyClaudeAction} />
             <MilestonesTimeline projects={projects} timelineData={timelineData} onOpen={openFromTimeline} />
 
             <div className="mb-8">
@@ -4047,6 +4046,10 @@ function LegajoApp({ userId, userEmail, onLogout }) {
                 )}
               </div>
             )}
+
+            <div className="mt-6">
+              <GlobalAskClaudePanel onApplyAction={applyClaudeAction} />
+            </div>
           </div>
         ) : view === "timeline" ? (
           <div>
