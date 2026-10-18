@@ -7,6 +7,10 @@
 // Atajo no tiene sesión de Supabase. En su lugar se autentica con una clave
 // personal (cabecera x-capture-token) cuyo hash está en capture_tokens. La clave
 // solo permite CREAR capturas del usuario dueño; no lee nada y se puede anular.
+//
+// NOTA: en el proyecto de Supabase esta función quedó desplegada con el nombre
+// «smart-responder» (el editor propone un nombre al azar y no se puede renombrar),
+// así que la URL del Atajo es .../functions/v1/smart-responder (no /capture).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "jsr:@supabase/server@^1";
 
