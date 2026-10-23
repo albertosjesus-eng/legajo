@@ -86,9 +86,7 @@ export default {
       const prompt =
         `Fecha de hoy: ${today} (${weekday}).\n\nProyectos activos:\n${lines.join("\n")}\n\n` +
         `Capturas pendientes:\n` +
-        (capturas as { id: string; texto: string }[])
-          .map((c) => `- [captura_id:${c.id}] ${c.texto.length > 2000 ? c.texto.slice(0, 2000) + " …[recortado]" : c.texto}`)
-          .join("\n");
+        (capturas as { id: string; texto: string }[]).map((c) => `- [captura_id:${c.id}] ${c.texto}`).join("\n");
 
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -106,8 +104,6 @@ export default {
             "o 'nota' (información, idea o apunte sin acción). Elige el proyecto más probable usando solo los " +
             "project_id dados; si ninguno encaja con claridad, omite project_id. Convierte fechas relativas a " +
             "YYYY-MM-DD desde la fecha de hoy. No inventes fechas que no se deduzcan del texto. " +
-            "Algunas capturas son correos que el usuario ha reenviado a su bandeja (empiezan por '[Correo]'): clasifícalas según lo que exijan " +
-            "(tarea si piden una acción, cita si fijan una reunión o fecha, nota si solo informan) y, en 'texto', resume la acción en una frase corta. " +
             "Responde en español y llama a la herramienta 'clasificar' con una sugerencia por captura.",
           tools: [TOOL],
           tool_choice: { type: "tool", name: "clasificar" },

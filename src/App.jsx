@@ -2205,7 +2205,7 @@ function CapturaRow({ captura, projects, onProcess, onDiscard, onEdit, onDelete,
   if (mode) {
     return (
       <div className="p-3 rounded-md flex flex-col gap-2" style={{ background: SURFACE2 }}>
-        <div className="text-sm whitespace-pre-wrap break-words max-h-48 overflow-y-auto" style={{ color: TEXT_LIGHT }}>
+        <div className="text-sm" style={{ color: TEXT_LIGHT }}>
           {captura.texto}
         </div>
         <select
