@@ -1374,9 +1374,9 @@ function TimelineView({ projects, timelineData, loading, onOpen }) {
 
 async function loadRecentCaptures(userId) {
   // Combina lo que este dispositivo tiene aún sin sincronizar (para que se
-  // vea al instante, sin esperar red) con las últimas capturas confirmadas
-  // en la base de datos compartida (para que sea igual en todos los
-  // dispositivos, no solo en el que las escribiste).
+  // vea al instante, sin esperar red) con las últimas capturas PENDIENTES
+  // de la base de datos compartida (para que sea igual en todos los
+  // dispositivos). Las ya procesadas o descartadas no se muestran.
   let localUnsynced = [];
   try {
     localUnsynced = await idbGetUnsyncedCaptures();
@@ -1392,14 +1392,17 @@ async function loadRecentCaptures(userId) {
   }));
 
   let remoteItems = [];
+  let remoteOk = false;
   if (navigator.onLine && userId) {
     try {
       const { data, error } = await supabase
         .from("capturas")
         .select("id,texto,created_at")
+        .eq("estado", "pendiente")
         .order("created_at", { ascending: false })
         .limit(5);
-      if (!error)
+      if (!error) {
+        remoteOk = true;
         remoteItems = (data || []).map((r) => ({
           key: "remote-" + r.id,
           texto: r.texto,
@@ -1407,6 +1410,7 @@ async function loadRecentCaptures(userId) {
           localId: null,
           remoteId: r.id,
         }));
+      }
     } catch (e) {
       // sin red o fallo puntual; seguimos solo con lo local
     }
@@ -1416,10 +1420,12 @@ async function loadRecentCaptures(userId) {
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     .slice(0, 5);
 
-  if (merged.length > 0) return merged;
+  // Si la base de datos respondió, su lista manda (aunque esté vacía).
+  if (merged.length > 0 || remoteOk) return merged;
 
-  // Sin red y sin nada pendiente: mostramos el historial local del propio
-  // dispositivo como último recurso, para no dejar la lista vacía sin motivo.
+  // Sin red (o sin poder consultarla) y sin nada pendiente: mostramos el
+  // historial local del propio dispositivo como último recurso, para no dejar
+  // la lista vacía sin motivo.
   try {
     const localAll = await idbGetRecentCaptures(5);
     return localAll.map((r) => ({ key: "local-" + r.localId, texto: r.texto, created_at: r.created_at, localId: r.localId, remoteId: r.remote_id || null }));
@@ -1506,13 +1512,16 @@ function QuickCapture({ userId, onOpenInbox, pendingCount, refreshTick, onSyncEr
     setRecent((r) => r.filter((x) => x.key !== item.key));
     try {
       if (item.remoteId) {
-        await supabase.from("capturas").delete().eq("id", item.remoteId);
+        const { error } = await supabase.from("capturas").delete().eq("id", item.remoteId);
+        if (error) throw error;
+        await idbDeleteByRemoteId(item.remoteId);
       }
       if (item.localId) {
         await idbDeleteByLocalId(item.localId);
       }
     } catch (e) {
-      if (onSyncError) onSyncError(String(e));
+      if (onSyncError) onSyncError(e?.message || String(e));
+      loadRecentCaptures(userId).then(setRecent); // si falló, que reaparezca en la lista
     }
   };
 
@@ -3103,6 +3112,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
         .update({ estado: "procesada", project_id: projectId, procesada_at: new Date().toISOString() })
         .eq("id", captura.id);
       if (updError) throw updError;
+      idbDeleteByRemoteId(captura.id).catch(() => {});
       if (inboxShowAll) {
         setInboxCapturas((c) => c.map((x) => (x.id === captura.id ? { ...x, estado: "procesada", project_id: projectId } : x)));
       } else {
@@ -3121,6 +3131,7 @@ function LegajoApp({ userId, userEmail, onLogout }) {
       setSaveError("No se pudo descartar la captura: " + error.message);
       return;
     }
+    idbDeleteByRemoteId(id).catch(() => {});
     if (inboxShowAll) {
       setInboxCapturas((c) => c.map((x) => (x.id === id ? { ...x, estado: "cerrada" } : x)));
     } else {
